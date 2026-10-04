@@ -712,7 +712,7 @@ pub fn summary(o: &Outcome, with_password: bool) -> String {
                 "shown on the installer's last screen only; a new one: mirai reset-password".to_owned()
             };
             format!(
-                "mirai {} is running.\n\n  Panel     {}\n  Login     {}\n  Password  {password}\n\nCommands on this server: mirai (menu), mirai status, mirai update",
+                "Mirai installed successfully.\n\nmirai {} is running.\n\n  Panel     {}\n  Login     {}\n  Password  {password}\n\nCommands on this server: mirai (menu), mirai status, mirai update",
                 o.version, o.url, o.login
             )
         }
