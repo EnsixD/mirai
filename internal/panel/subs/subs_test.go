@@ -154,6 +154,12 @@ func TestMihomoProfile(t *testing.T) {
 
 func TestCustomNames(t *testing.T) {
 	prof := profile(t, "")
+	// Explicit fixtures: fresh installations intentionally have no default inbounds.
+	config, err := presets.NewConfig("vless_reality_tcp", "www.example.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof.Inbounds = []db.Inbound{{ID: 1, NodeID: 1, Name: "one", Preset: "vless_reality_tcp", Port: "443", Enabled: 1, Config: config}, {ID: 2, NodeID: 1, Name: "two", Preset: "vless_reality_tcp", Port: "8443", Enabled: 1, Config: config}}
 	prof.Inbounds[0].DisplayName = "🇳🇱 Нидерланды"
 	prof.Inbounds[1].DisplayName = "🇳🇱 Нидерланды" // duplicates must not break the profile
 	raw, err := Mihomo(prof, Groups{Main: "🚀 Мой VPN", Auto: "⚡ Быстрый"}, RoutingRUDirect)
