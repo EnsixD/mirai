@@ -204,6 +204,9 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
             <>
               <Field label={t("inbounds.subName")} htmlFor="ed-name" hint={t("inbounds.subNameHint")} error={errors.display_name}>
                 <input id="ed-name" className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={defaultName} maxLength={48} aria-invalid={!!errors.display_name} autoComplete="off" />
+                <div className="flex flex-wrap gap-1.5 mt-2">{["🇩🇪","🇳🇱","🇫🇮","🇺🇸","🇬🇧","🇫🇷","🛡️","⚡","🌐"].map(icon=><button type="button" key={icon} className="chip-btn" aria-label={`Добавить ${icon}`} onClick={()=>setName(value=>(value+icon).slice(0,48))}>{icon}</button>)}</div>
+                <p className="text-xs text-[var(--ink-500)] mt-2">Флаги и эмодзи сохраняются в имени подключения для Happ, INCY и Clash. Например: 🇩🇪 DE #1 | WS [Мобильный] 🛡️</p>
+                <div className="rounded-xl border border-[var(--line)] p-3 mt-2"><span className="text-xs text-[var(--ink-500)]">Как увидит клиент</span><div className="mt-1">{name.trim() || defaultName}</div></div>
               </Field>
               <Field label={t("inbounds.portLabel")} htmlFor="ed-port" error={errors.port} hint={inbound?.type === "hysteria2" ? t("inbounds.portHopHint") : undefined}>
                 <input id="ed-port" className="input max-w-[200px]" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} aria-invalid={!!errors.port} />
