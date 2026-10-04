@@ -12,6 +12,9 @@ the signed manifest, and the panel shows the one in its language.
 - **Several terms in one plan**: a plan can be sold for 7, 30 or 90 days, each with its own price in Stars and rubles (Plans → a plan → More terms). The buyer picks the term in the bot and the Mini App; limits are not multiplied, traffic resets by the plan's strategy. An invoice keeps the term and price it was made for.
 - **Free trial in the bot**: pick a plan in Payments → settings, and the bot's welcome offers it once per Telegram account to people without a subscription or payments. It needs a plan with a term.
 - Confirmation dialogs are no longer cut off on phones.
+- Node configuration ("Configure") now opens in a modal window.
+- Settings → Rules layout formatted in a full-width vertical column.
+- Custom public subscription domain with automatic DNS reachability validation and root path support.
 
 ### ru
 - Установщик больше не останавливается, если порты 80 или 443 заняты nginx или Caddy. Протоколы с занятым портом получают другие свободные порты. С доменом он предлагает сам добавить правило для Let's Encrypt в nginx или Caddy: делает копию конфига, проверяет его и откатывает при ошибке. Без вашего согласия только показывает, какие строки добавить.
@@ -21,6 +24,9 @@ the signed manifest, and the panel shows the one in its language.
 - **Несколько сроков в одном тарифе**: тариф можно продавать на 7, 30 или 90 дней, у каждого срока своя цена в Stars и рублях («Тарифы → тариф → Другие сроки»). Покупатель выбирает срок в боте и Mini App, лимиты не умножаются, трафик сбрасывается по стратегии тарифа. Счёт сохраняет срок и цену, с которыми выставлен.
 - **Пробный период в боте**: выберите тариф в «Платежи → настройки», и приветствие бота предложит его один раз на Telegram-аккаунт тем, у кого нет подписки и оплат. Нужен тариф со сроком.
 - Диалоги подтверждения больше не обрезаются на телефонах.
+- Настройка ноды («Настроить») теперь открывается в модальном окне.
+- Вкладка правил маршрутизации выстроена в столбик на всю ширину страницы.
+- Настраиваемый публичный адрес подписок с автоматической проверкой DNS и поддержкой корневого адреса.
 
 ## 0.5.0.0
 ### en
