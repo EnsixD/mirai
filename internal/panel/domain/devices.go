@@ -47,8 +47,9 @@ const MaxDevices = 50
 const DeviceIdle = 90 * 24 * time.Hour
 
 var (
-	ErrDeviceLimit    = errors.New("device_limit")    // the user's places are taken
-	ErrNoHWID         = errors.New("no_hwid")         // the app sends no device id and one is required
+	ErrDeviceLimit    = errors.New("device_limit") // the user's places are taken
+	ErrNoHWID         = errors.New("no_hwid")      // the app sends no device id and one is required
+	ErrResetDisabled  = errors.New("device_reset_disabled")
 	ErrUnbindCooldown = errors.New("unbind_cooldown") // the subscriber unbound a device less than a day ago
 )
 
@@ -202,7 +203,7 @@ func (d *Devices) Unbind(ctx context.Context, userID, deviceID int64, bySubscrib
 func (d *Devices) unbind(ctx context.Context, userID, deviceID int64, bySubscriber bool) error {
 	now := d.now()
 	return d.st.Tx(ctx, func(q *db.Queries) error {
-		u, err := q.GetUser(ctx, userID)
+		_, err := q.GetUser(ctx, userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -216,29 +217,18 @@ func (d *Devices) unbind(ctx context.Context, userID, deviceID int64, bySubscrib
 		if err != nil {
 			return err
 		}
-		if bySubscriber && now.Sub(time.Unix(u.UnboundAt, 0)) < UnbindCooldown {
-			return ErrUnbindCooldown
-		}
-		if dev.Hwid == "" {
-			fresh, err := q.TakeFreeSlot(ctx)
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrNoSlots
-			}
-			if err != nil {
-				return err
-			}
-			if err := q.SetUserSlot(ctx, db.SetUserSlotParams{SlotID: sql.NullInt64{Int64: fresh.ID, Valid: true}, UpdatedAt: now.Unix(), ID: userID}); err != nil {
-				return err
-			}
-		}
-		if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: dev.SlotID}); err != nil {
-			return err
-		}
-		if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
-			return err
-		}
 		if bySubscriber {
-			return q.SetUserUnboundAt(ctx, db.SetUserUnboundAtParams{UnboundAt: now.Unix(), ID: userID})
+			if _, err := resetAllowance(ctx, q, userID, now, false); err != nil {
+				return err
+			}
+		}
+
+		if err := d.removeDeviceTx(ctx, q, userID, dev); err != nil {
+			return err
+		}
+
+		if bySubscriber {
+			return q.RecordReset(ctx, userID, now.Unix())
 		}
 		return nil
 	})
@@ -302,4 +292,27 @@ func burnDevices(ctx context.Context, q *db.Queries, userID, now int64) error {
 		}
 	}
 	return q.DeleteBoundDevicesOf(ctx, userID)
+}
+
+func (d *Devices) removeDeviceTx(ctx context.Context, q *db.Queries, userID int64, dev db.BoundDevice) error {
+	now := d.now()
+	if dev.Hwid == "" {
+		fresh, err := q.TakeFreeSlot(ctx)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNoSlots
+		}
+		if err != nil {
+			return err
+		}
+		if err := q.SetUserSlot(ctx, db.SetUserSlotParams{SlotID: sql.NullInt64{Int64: fresh.ID, Valid: true}, UpdatedAt: now.Unix(), ID: userID}); err != nil {
+			return err
+		}
+	}
+	if err := q.BurnSlot(ctx, db.BurnSlotParams{BurnedAt: sql.NullInt64{Int64: now.Unix(), Valid: true}, ID: dev.SlotID}); err != nil {
+		return err
+	}
+	if err := q.DeleteBoundDevice(ctx, dev.ID); err != nil {
+		return err
+	}
+	return nil
 }

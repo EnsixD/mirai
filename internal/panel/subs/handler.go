@@ -807,7 +807,7 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 			out.Bound = append(out.Bound, DeviceItem{ID: d.ID, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, Shared: d.Hwid == "",
 				CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC()})
 		}
-		if t := domain.NextUnbind(u, now); !t.IsZero() {
+		if t := h.nextDeviceReset(ctx, u.ID); !t.IsZero() {
 			out.UnbindAfter = &t
 		}
 	}
@@ -862,7 +862,9 @@ func (h *Handler) unbind(w http.ResponseWriter, r *http.Request, u db.User, id i
 	case errors.Is(err, domain.ErrUnbindCooldown):
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]any{"code": "unbind_cooldown", "unbind_after": domain.NextUnbind(u, h.now())})
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": "unbind_cooldown", "unbind_after": h.nextDeviceReset(r.Context(), u.ID)})
+	case errors.Is(err, domain.ErrResetDisabled):
+		http.Error(w, "device_reset_disabled", http.StatusForbidden)
 	case errors.Is(err, domain.ErrNotFound):
 		server.NotFound(w)
 	default:
@@ -986,4 +988,14 @@ func (h *Handler) poolInfo(ctx context.Context, userID int64, grants domain.Gran
 		out = append(out, pi)
 	}
 	return out, nil
+}
+
+func (h *Handler) nextDeviceReset(ctx context.Context, user int64) time.Time {
+	if service, ok := h.devices.(interface {
+		NextReset(context.Context, int64) (time.Time, error)
+	}); ok {
+		next, _ := service.NextReset(ctx, user)
+		return next
+	}
+	return time.Time{}
 }
