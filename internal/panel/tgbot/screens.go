@@ -39,11 +39,27 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			return b.shopInvoice(ctx, w, chat, 0, arg, []Button{{Text: w.back, CallbackData: "tn:" + id}})
 		}
 	}
+	if cmd == "b" {
+		return "Покупка подписок сейчас недоступна.", &Keyboard{[][]Button{{{Text: w.back, CallbackData: "m"}}}}
+	}
 	if cmd == "tr" {
 		return b.takeTrial(ctx, w, chat)
 	}
 	if cmd == "pf" {
 		return b.customerProfile(ctx, cfg, chat, list)
+	}
+	if cmd == "m" || cmd == "" {
+		name := strconv.FormatInt(chat, 10)
+		if account, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && account.FirstName != "" {
+			name = account.FirstName
+		}
+		text := render(pick(cfg.Texts.Main, w.main), map[string]string{"brand": b.brand(ctx), "name": name})
+		if notice != "" {
+			text = html.EscapeString(notice) + "\n\n" + text
+		}
+		kb := b.menu(ctx, cfg, w, len(list))
+		b.addAdminButton(ctx, chat, kb)
+		return text, kb
 	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, chat, notice)
@@ -73,19 +89,14 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			lines = append(lines, html.EscapeString(fmt.Sprintf(w.resets, r)))
 		}
 		lines = append(lines, "📱 "+html.EscapeString(vars["devices"]))
-		rows := [][]Button{{{Text: labelOf(cfg, "connect", w.openPage), CallbackData: "c"}, {Text: labelOf(cfg, "devices", "📱"), CallbackData: "d"}}, {{Text: labelOf(cfg, "renew", w.renewTitle), CallbackData: "r"}}}
-		if len(list) > 1 {
-			rows = append(rows, []Button{{Text: w.subscriptions, CallbackData: "w"}})
-		}
-		if offers := b.packageOffers(ctx, u.ID); len(offers) > 0 {
-			rows = append(rows, []Button{{Text: w.buyTraffic, CallbackData: "x"}})
-		}
+		rows := [][]Button{{{Text: "▣ " + w.devicesTitle, CallbackData: "d"}}}
+		back = []Button{{Text: w.back, CallbackData: "pf"}}
 		return withNotice(strings.Join(lines, "\n")), &Keyboard{append(rows, back)}
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
-	case "d", "dc":
+	case "d", "dc", "da":
 		id, _ := strconv.ParseInt(arg, 10, 64)
-		return b.devices(ctx, w, u, cmd, id, notice, now)
+		return b.devices(ctx, w, u, cmd, id, notice, now, chat)
 	case "c":
 		text := "<b>" + w.connectTitle + "</b>\n\n" + fmt.Sprintf(w.connectText, html.EscapeString(b.subURL(ctx, u)))
 		rows := [][]Button{}
@@ -189,8 +200,8 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 		switch mb.Action {
 		case "profile":
 			btn = Button{Text: mb.Label, CallbackData: "pf"}
-		case "subscriptions":
-			btn = Button{Text: fmt.Sprintf("%s (%d)", mb.Label, subs), CallbackData: "w"}
+		case "buy":
+			btn = Button{Text: mb.Label, CallbackData: "b"}
 		case "devices":
 			btn = Button{Text: mb.Label, CallbackData: "d"}
 		case "connect":
@@ -221,18 +232,6 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 			rows = append(rows, []Button{btn})
 		}
 	}
-	if url := b.miniAppURL(ctx, cfg); url != "" {
-		rows = append(rows, []Button{{Text: w.promo, WebApp: &WebApp{URL: url + "#promocodes"}}})
-	}
-	hasSubscriptions := false
-	for _, button := range cfg.Buttons {
-		if button.Action == "subscriptions" {
-			hasSubscriptions = true
-		}
-	}
-	if subs > 0 && !hasSubscriptions {
-		rows = append(rows, []Button{{Text: fmt.Sprintf("%s (%d)", w.subscriptions, subs), CallbackData: "w"}})
-	}
 	return &Keyboard{InlineKeyboard: rows}
 }
 
@@ -245,8 +244,8 @@ func (b *Bot) pageButton(ctx context.Context, cfg Config, w *words, label string
 	return Button{}, false
 }
 
-func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id int64, notice string, now time.Time) (string, *Keyboard) {
-	back := []Button{{Text: w.back, CallbackData: "m"}}
+func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id int64, notice string, now time.Time, chat int64) (string, *Keyboard) {
+	back := []Button{{Text: w.back, CallbackData: "s"}}
 	binding, _ := b.d.Settings.On(ctx, settings.DeviceBinding)
 	head := "<b>" + w.devicesTitle + "</b> · " + html.EscapeString(b.vars(ctx, w, u, now)["devices"])
 	if !binding {
@@ -261,6 +260,11 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		devs = nil
 	}
 	name := func(d db.BoundDevice) string { return deviceName(w, d) }
+	policy, _ := domain.ResetPolicy(ctx, b.d.Store.Q)
+	admin := b.isAdmin(ctx, chat, chat)
+	if cmd == "da" {
+		return "Очистить все устройства этой подписки?", &Keyboard{[][]Button{{{Text: "Очистить все", CallbackData: "dua"}, {Text: w.cancel, CallbackData: "d"}}}}
+	}
 	if cmd == "dc" {
 		for _, d := range devs {
 			if d.ID == id {
@@ -287,10 +291,17 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		}
 		meta = append(meta, w.ago(time.Unix(d.LastSeen, 0), now))
 		lines = append(lines, fmt.Sprintf("%d. %s — %s", i+1, html.EscapeString(name(d)), html.EscapeString(strings.Join(meta, " · "))))
-		rows = append(rows, []Button{{Text: "❌ " + name(d), CallbackData: "dc:" + strconv.FormatInt(d.ID, 10)}})
+		if policy.Single || admin {
+			rows = append(rows, []Button{{Text: "× " + name(d), CallbackData: "dc:" + strconv.FormatInt(d.ID, 10)}})
+		}
 	}
 	if len(devs) > 0 {
-		lines = append(lines, "", html.EscapeString(w.devicesNote))
+		if policy.All || admin {
+			rows = append(rows, []Button{{Text: "↻ Очистить все устройства", CallbackData: "da"}})
+		}
+		if !admin {
+			lines = append(lines, "", fmt.Sprintf("Лимит: %d очистки за %d дней. Очистка всех устройств считается одной операцией.", policy.Limit, policy.PeriodDays))
+		}
 	}
 	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
 }
@@ -314,6 +325,16 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 	cmd, arg, _ := strings.Cut(data, ":")
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	switch cmd {
+	case "dua":
+		_, u, ok := b.subs(ctx, chat)
+		if !ok {
+			return "m", ""
+		}
+		err := b.d.Devices.UnbindAll(ctx, u.ID, !b.isAdmin(ctx, chat, chat))
+		if err != nil {
+			return "d", "Очистка недоступна: проверьте лимит и настройки."
+		}
+		return "d", "Все устройства очищены."
 	case "du":
 		w := wordsFor(b.Config(ctx).Lang)
 		_, u, ok := b.subs(ctx, chat)
@@ -325,13 +346,15 @@ func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice 
 			if d.ID != id {
 				continue
 			}
-			err := b.d.Devices.Unbind(ctx, u.ID, id, true)
+			err := b.d.Devices.Unbind(ctx, u.ID, id, !b.isAdmin(ctx, chat, chat))
 			switch {
 			case err == nil:
 				return "d", fmt.Sprintf(w.unbound, deviceName(w, d))
 			case errors.Is(err, domain.ErrUnbindCooldown):
-				fresh, _ := b.d.Store.Q.GetUser(ctx, u.ID)
-				return "d", fmt.Sprintf(w.wait, b.when(w, domain.NextUnbind(fresh, b.d.Now())))
+				next, _ := b.d.Devices.NextReset(ctx, u.ID)
+				return "d", fmt.Sprintf(w.wait, b.when(w, next))
+			case errors.Is(err, domain.ErrResetDisabled):
+				return "d", "Очистка устройств отключена администратором."
 			}
 		}
 		return "d", ""

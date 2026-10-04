@@ -53,11 +53,8 @@ func (b *Bot) customerProfile(ctx context.Context, cfg Config, chat int64, subsc
 	}
 	lines = append(lines, "", tr("Учтены завершённые покупки без возвратов. Бесплатные и выданные администратором подписки не входят в оплаченный срок. Месяц в статистике — 30 дней.", "Completed purchases excluding refunds. Free and administrator-issued subscriptions do not count as purchased time. A month here is 30 days."))
 	rows := [][]Button{}
-	if len(subscriptions) > 0 {
-		rows = append(rows, []Button{{Text: tr("▤ Мои подписки", "▤ My subscriptions"), CallbackData: "w"}})
-	}
-	if b.canBuyNew(ctx) {
-		rows = append(rows, []Button{{Text: wordsFor(cfg.Lang).buy, CallbackData: "b"}})
+	for _, subscription := range subscriptions {
+		rows = append(rows, []Button{{Text: "▣ " + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
 	}
 	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
 }

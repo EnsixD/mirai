@@ -23,6 +23,7 @@ import (
 // TelegramView is the bot as the admin panel shows it. The token itself never leaves
 // the panel.
 type TelegramView struct {
+	DeviceReset    domain.DeviceResetPolicy `json:"device_reset"`
 	Enabled        bool                     `json:"enabled"`
 	TokenSet       bool                     `json:"token_set" doc:"Токен сохранён"`
 	TokenHint      string                   `json:"token_hint,omitempty" doc:"ID бота из токена"`
@@ -65,6 +66,7 @@ type telegramOutput struct{ Body TelegramView }
 
 type patchTelegramInput struct {
 	Body struct {
+		DeviceReset    *domain.DeviceResetPolicy      `json:"device_reset,omitempty"`
 		Enabled        *bool                          `json:"enabled,omitempty"`
 		AdminID        *int64                         `json:"admin_id,omitempty" minimum:"0" maximum:"9007199254740991"`
 		Token          *string                        `json:"token,omitempty" maxLength:"100" doc:"Токен от @BotFather; пустая строка — удалить"`
@@ -170,6 +172,10 @@ func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 	}
 	v.Defaults = tgbot.DefaultTexts(v.Config.Lang)
 	v.AdminID, _, err = settings.Get[int64](ctx, h.d.Settings, tgbot.KeyAdminID)
+	if err != nil {
+		return v, err
+	}
+	v.DeviceReset, err = domain.ResetPolicy(ctx, h.d.Store.Q)
 	if err != nil {
 		return v, err
 	}
@@ -295,6 +301,11 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	// other's fields (a serialization conflict merges again).
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
+		if b.DeviceReset != nil {
+			if err := settings.Set(ctx, set, domain.DeviceResetKey, *b.DeviceReset); err != nil {
+				return err
+			}
+		}
 		if b.AdminID != nil {
 			if err := settings.Set(ctx, set, tgbot.KeyAdminID, *b.AdminID); err != nil {
 				return err

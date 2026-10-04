@@ -129,7 +129,7 @@ function TelegramBody({ v }: { v: View }) {
             <BackupCard />
           </div>
         ) : tab === "admin" ? (
-          <AdminMenuCard draft={draft} setDraft={setDraft} />
+          <><AdminMenuCard draft={draft} setDraft={setDraft} /><DeviceResetCard v={v} /></>
         ) : (
           <div className="w-full">
             <BroadcastCard v={v} />
@@ -600,15 +600,15 @@ function RouteCard({ v }: { v: View }) {
   );
 }
 
-const ACTIONS = ["profile", "subscriptions", "devices", "connect", "renew", "support", "app"] as const;
+
 
 function MenuActionIcon({ action }: { action: string }) {
- const Icon = ({ profile: UserRound, subscriptions: LayoutList, devices: Smartphone, connect: ArrowUpRight, renew: Wallet, support: LifeBuoy, app: Globe, url: Link2, page: LayoutList } as Record<string, typeof UserRound>)[action] ?? LayoutList;
+ const Icon = ({ profile: UserRound, buy: Wallet, devices: Smartphone, connect: ArrowUpRight, renew: Wallet, support: LifeBuoy, app: Globe, url: Link2, page: LayoutList } as Record<string, typeof UserRound>)[action] ?? LayoutList;
  return <Icon size={17} strokeWidth={1.6} className="shrink-0 text-[var(--ink-500)]" aria-hidden />;
 }
 
 function actionLabel(a: string): string {
-  return tMaybe(`telegram.action.${a}`) ?? a;
+  return a === "buy" ? "Купить подписку" : tMaybe(`telegram.action.${a}`) ?? a;
 }
 
 function MenuReorderItem({ id, reduce, children }: { id: string; reduce: boolean; children: ReactNode }) {
@@ -636,7 +636,7 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
       buttons: [...draft.buttons, { id: `c${Date.now().toString(36)}`, action, label: action === "url" ? t("telegram.newLink") : t("telegram.newPage"), on: true, row: false, url: action === "url" ? "https://" : undefined, text: action === "page" ? "" : undefined }],
     });
   };
-  const custom = (b: MenuButton) => !ACTIONS.includes(b.action as (typeof ACTIONS)[number]);
+
   const reduce = useReducedMotion();
   return (
     <section {...rise(1)}>
@@ -659,11 +659,11 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
                   onKeyDown={(e) => { if (e.key === "ArrowUp" && i > 0) { e.preventDefault(); move(i, -1); } else if (e.key === "ArrowDown" && i < draft.buttons.length - 1) { e.preventDefault(); move(i, 1); } }}>
                   <GripVertical size={18} aria-hidden />
                 </button>
-                {custom(b) ? (
+                {(
                   <button type="button" className="icon-btn" onClick={() => setDraft({ ...draft, buttons: draft.buttons.filter((_, j) => j !== i) })} aria-label={t("telegram.deleteButton", { name: b.label })}>
                     <Trash2 size={16} />
                   </button>
-                ) : null}
+                )}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ink-500)]">
                 <span>{actionLabel(b.action)}</span>
@@ -682,6 +682,7 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
         </AnimatePresence>
       </Reorder.Group>
       <div className="mt-3 flex flex-wrap gap-2">
+        {(["profile", "buy", "renew"] as const).filter(action => !draft.buttons.some(b => b.action === action)).map(action => <button key={action} type="button" className="chip-btn" disabled={draft.buttons.length >= 20} onClick={() => setDraft({...draft, buttons: [...draft.buttons, {id: action, action, label: ({profile: "◉ Профиль", buy: "◇ Купить", renew: "↻ Продлить"})[action], on: true, row: false}]})}>+ {({profile: "Профиль", buy: "Купить", renew: "Продлить"})[action]}</button>)}
         <button type="button" className="chip-btn" onClick={() => add("url")} disabled={draft.buttons.length >= 20}>
           <Plus size={14} className="mr-1 inline" aria-hidden />
           {t("telegram.addLink")}
@@ -837,7 +838,7 @@ function BroadcastProgress({ b }: { b: Schemas["TelegramBroadcast"] }) {
 
 /** The main menu as a subscriber sees it in Telegram, with sample data. */
 function Preview({ draft, v }: { draft: Config; v: View }) {
-  const [screen, setScreen] = useState<"main" | "profile" | "subscriptions">("main");
+  const [screen, setScreen] = useState<"main" | "profile" | "subscriptions" | "devices">("main");
   const settings = useSettings();
   const brand = settings.data?.brand || "VPN";
   const support = !!settings.data?.support_url;
@@ -861,15 +862,17 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
     [brand, locale],
   );
   const mainText = (draft.texts.main || v.defaults.main).replace(/\{(\w+)\}/g, (m, k: string) => sample[k] ?? m);
-  const text = screen === "profile" ? t("telegram.sample.profile", { name: sample.name ?? "" }) : screen === "subscriptions" ? t("telegram.sample.subscriptions", { name: sample.name ?? "", term: sample.term ?? "", traffic: sample.traffic ?? "" }) : mainText;
+  const text = screen === "devices" ? "▣ Устройства · 2 из 3\n\n1. iPhone · Happ\n2. Windows · INCY" : screen === "profile" ? t("telegram.sample.profile", { name: sample.name ?? "" }) : screen === "subscriptions" ? t("telegram.sample.subscriptions", { name: sample.name ?? "", term: sample.term ?? "", traffic: sample.traffic ?? "" }) : mainText;
   const reduce = useReducedMotion();
   const rows: MenuButton[][] = [];
-  for (const b of draft.buttons) {
+  const previewButtons: MenuButton[] = screen === "devices" ? [{id: "subscription", action: "page", label: "← Подписка", on: true, row: false}] : screen === "profile" ? [{id: "subscription", action: "page", label: "▣ Подписка · Анна", on: true, row: false}, {id: "home", action: "page", label: "← Главное меню", on: true, row: false}] : screen === "subscriptions" ? [{id: "devices", action: "devices", label: "▣ Устройства", on: true, row: false}, {id: "profile", action: "profile", label: "← Профиль", on: true, row: false}] : draft.buttons;
+  for (const b of previewButtons) {
     if (!b.on || (b.action === "support" && !support) || (b.action === "app" && !(draft.mini_app && v.mini_app_url))) continue;
     const last = rows[rows.length - 1];
     if (b.row && last && last.length < 3) last.push(b);
     else rows.push([b]);
   }
+  if (screen === "main" && draft.admin.enabled) rows.push([{id: "admin-preview", action: "page", label: "◎ Админ-панель · только ваш ID", on: true, row: false}]);
   return (
     <section {...rise(1)} aria-label={t("telegram.preview")}>
       <div className="card-head">
@@ -879,7 +882,7 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
         </div>
       </div>
       <div className="flex flex-wrap gap-2 mb-3">
-        {(["main", "profile", "subscriptions"] as const).map((item) => <button type="button" key={item} className="chip-btn" aria-pressed={screen === item} onClick={() => setScreen(item)}>{t(`telegram.previewScreens.${item}`)}</button>)}
+        {(["main", "profile", "subscriptions"] as const).map((item) => <button type="button" key={item} className="chip-btn" aria-pressed={screen === item} onClick={() => setScreen(item)}>{item === "subscriptions" ? "Подписка" : t(`telegram.previewScreens.${item}`)}</button>)}
       </div>
       <div className="tg-chat">
         <div className="tg-bubble">{text}</div>
@@ -889,7 +892,7 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
               <motion.div key={r[0]!.id} className="tg-row" layout={!reduce} transition={slide}>
                 <AnimatePresence initial={false} mode="popLayout">
                   {r.map((b) => (
-                    <motion.button type="button" onClick={() => { if (b.action === "profile") setScreen("profile"); else if (b.action === "subscriptions") setScreen("subscriptions"); }}
+                    <motion.button type="button" onClick={() => { if (b.action === "profile") setScreen("profile"); else if (b.id === "subscription") setScreen("subscriptions"); else if (b.id === "home") setScreen("main"); else if (b.action === "devices") setScreen("devices"); }}
                       key={b.id}
                       className="tg-btn"
                       layout={!reduce}
@@ -917,10 +920,17 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
 }
 
 function AdminMenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) => void }) {
- return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+ return <><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
   {(["enabled", "users", "subscriptions", "statistics", "search", "grant"] as const).map((key) => <section key={key} className="card glass">
    <div className="flex items-center gap-3"><Shield size={20} className="text-[var(--ink-500)]" /><h2 className="card-title flex-1">{t(`telegram.adminMenu.${key}`)}</h2><Switch checked={draft.admin[key]} label={t(`telegram.adminMenu.${key}`)} onChange={(value) => setDraft({ ...draft, admin: { ...draft.admin, [key]: value } })} /></div>
    <p className="card-sub mt-3">{t(`telegram.adminMenu.${key}Hint`)}</p>
   </section>)}
- </div>;
+ </div><section className="card glass mt-4 max-w-lg"><h2 className="card-title mb-3">Превью админ-панели · только ваш Telegram ID</h2><div className="tg-chat"><div className="tg-bubble">◎ Админ-панель Mirai
+Управление пользователями и подписками{draft.admin.statistics ? "\nАктивные: 24 · Истекают: 3\nИстекли: 2 · Лимит: 1 · Заморожены: 0" : ""}</div><div className="tg-keyboard">{draft.admin.enabled ? (["users", "subscriptions", "search", "grant"] as const).filter(key => draft.admin[key]).map(key => <div className="tg-row" key={key}><button type="button" className="tg-btn">{({users: "▤ Пользователи", subscriptions: "▣ Все подписки", statistics: "▤ Статистика", search: "⌕ Поиск", grant: "＋ Выдать подписку"})[key]}</button></div>) : <div className="tg-bubble">Админ-меню отключено</div>}<div className="tg-row"><button type="button" className="tg-btn">← Главное меню</button></div></div></div></section></>;
+}
+
+function DeviceResetCard({v}: {v: View}) {
+ const {draft, setDraft, dirty} = useDraft(v.device_reset);
+ const patch = usePatchTelegram(); const toast = useToast();
+ return <section className="card glass mt-4"><h2 className="card-title">Очистка устройств</h2><p className="card-sub">Общий лимит для каждой подписки. Для администратора — без ограничений. Очистка всех устройств считается одной операцией.</p><div className="grid gap-4 mt-4 md:grid-cols-2"><div className="flex items-center gap-3"><span>По одному устройству</span><Switch checked={draft.single} label="Очистка по одному" onChange={single => setDraft({...draft, single})}/></div><div className="flex items-center gap-3"><span>Все устройства сразу</span><Switch checked={draft.all} label="Очистка всех устройств" onChange={all => setDraft({...draft, all})}/></div><Field label="Количество очисток"><input className="input" type="number" min={1} max={1000} value={draft.limit} onChange={e => setDraft({...draft, limit: Number(e.target.value)})}/></Field><Field label="Период в днях"><input className="input" type="number" min={1} max={365} value={draft.period_days} onChange={e => setDraft({...draft, period_days: Number(e.target.value)})}/></Field></div><p className="card-sub mt-3">Например: 4 очистки за 30 дней. Каждая использованная очистка снова доступна через этот период.</p><Button className="mt-3" disabled={!dirty || patch.isPending || draft.limit < 1 || draft.limit > 1000 || draft.period_days < 1 || draft.period_days > 365} onClick={() => patch.mutate({device_reset: draft}, {onSuccess: () => toast.ok(t("telegram.saved")), onError: e => toast.error(errorText(e))})}>Сохранить лимиты</Button></section>;
 }

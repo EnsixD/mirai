@@ -35,7 +35,7 @@ func (b *Bot) isAdmin(ctx context.Context, sender, chat int64) bool {
 
 func (b *Bot) addAdminButton(ctx context.Context, chat int64, kb *Keyboard) {
 	if kb != nil && b.isAdmin(ctx, chat, chat) {
-		kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: "⚙️ Админ", CallbackData: "a:home"}})
+		kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: "◎ Админ-панель", CallbackData: "a:home"}})
 	}
 }
 

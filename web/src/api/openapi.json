@@ -933,6 +933,10 @@
             ],
             "type": "string"
           },
+          "menu_version": {
+            "format": "int64",
+            "type": "integer"
+          },
           "mini_app": {
             "description": "Кнопка Mini App со страницей подписки",
             "type": "boolean"
@@ -949,6 +953,7 @@
           }
         },
         "required": [
+          "menu_version",
           "admin",
           "lang",
           "buttons",
@@ -1070,6 +1075,36 @@
         "required": [
           "name",
           "tariff_id"
+        ],
+        "type": "object"
+      },
+      "DeviceResetPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "limit": {
+            "format": "int64",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "period_days": {
+            "format": "int64",
+            "maximum": 365,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "single": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "single",
+          "all",
+          "limit",
+          "period_days"
         ],
         "type": "object"
       },
@@ -1743,7 +1778,7 @@
           "action": {
             "enum": [
               "profile",
-              "subscriptions",
+              "buy",
               "sub",
               "devices",
               "connect",
@@ -2558,6 +2593,9 @@
           },
           "config": {
             "$ref": "#/components/schemas/Config"
+          },
+          "device_reset": {
+            "$ref": "#/components/schemas/DeviceResetPolicy"
           },
           "enabled": {
             "type": "boolean"
@@ -4198,6 +4236,9 @@
             "$ref": "#/components/schemas/Texts",
             "description": "Встроенные тексты на языке бота: пустое поле берёт их"
           },
+          "device_reset": {
+            "$ref": "#/components/schemas/DeviceResetPolicy"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -4234,6 +4275,7 @@
           }
         },
         "required": [
+          "device_reset",
           "enabled",
           "token_set",
           "running",

@@ -18,13 +18,14 @@ type AdminMenuConfig struct {
 	Statistics    bool `json:"statistics"`
 }
 type Config struct {
-	Admin     AdminMenuConfig `json:"admin"`
-	Lang      string          `json:"lang" enum:"ru,en" doc:"Язык встроенных надписей бота"`
-	Buttons   []MenuButton    `json:"buttons" doc:"Кнопки главного меню по порядку"`
-	Texts     Texts           `json:"texts"`
-	Notify    Notify          `json:"notify"`
-	MiniApp   bool            `json:"mini_app" doc:"Кнопка Mini App со страницей подписки"`
-	CleanChat bool            `json:"clean_chat" doc:"Удалять сообщения пользователя, чтобы в чате было одно меню"`
+	MenuVersion int             `json:"menu_version"`
+	Admin       AdminMenuConfig `json:"admin"`
+	Lang        string          `json:"lang" enum:"ru,en" doc:"Язык встроенных надписей бота"`
+	Buttons     []MenuButton    `json:"buttons" doc:"Кнопки главного меню по порядку"`
+	Texts       Texts           `json:"texts"`
+	Notify      Notify          `json:"notify"`
+	MiniApp     bool            `json:"mini_app" doc:"Кнопка Mini App со страницей подписки"`
+	CleanChat   bool            `json:"clean_chat" doc:"Удалять сообщения пользователя, чтобы в чате было одно меню"`
 	// QuietNight: the automatic notices from 22:00 to 9:00 Moscow time come without a sound.
 	QuietNight bool `json:"quiet_night" doc:"Уведомления с 22:00 до 9:00 МСК приходят без звука"`
 }
@@ -33,7 +34,7 @@ type Config struct {
 // a text of the admin's.
 type MenuButton struct {
 	ID     string `json:"id" doc:"Постоянный id кнопки"`
-	Action string `json:"action" enum:"profile,subscriptions,sub,devices,connect,renew,support,app,url,page"`
+	Action string `json:"action" enum:"profile,buy,sub,devices,connect,renew,support,app,url,page"`
 	Label  string `json:"label"`
 	On     bool   `json:"on"`
 	Row    bool   `json:"row" doc:"В одном ряду с предыдущей"`
@@ -62,7 +63,7 @@ type Notify struct {
 }
 
 // Built-in actions, each at most once in the menu.
-var builtins = []string{"profile", "subscriptions", "devices", "connect", "renew", "support", "app"}
+var builtins = []string{"profile", "buy", "devices", "connect", "renew", "support", "app"}
 
 // Default is the menu of a fresh bot in lang, "en" or else Russian.
 func Default(lang string) Config {
@@ -76,17 +77,14 @@ func Default(lang string) Config {
 		return ru
 	}
 	return Config{
-		Lang:  lang,
-		Texts: DefaultTexts(lang),
-		Admin: AdminMenuConfig{Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
+		Lang:        lang,
+		MenuVersion: 2,
+		Texts:       DefaultTexts(lang),
+		Admin:       AdminMenuConfig{Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
 		Buttons: []MenuButton{
 			{ID: "profile", Action: "profile", Label: l("◉ Профиль", "◉ Profile"), On: true},
-			{ID: "subscriptions", Action: "subscriptions", Label: l("▤ Мои подписки", "▤ My subscriptions"), On: true, Row: true},
-			{ID: "devices", Action: "devices", Label: l("▣ Устройства", "▣ Devices"), On: true},
-			{ID: "connect", Action: "connect", Label: l("↗ Подключить устройство", "↗ Connect a device"), On: true},
-			{ID: "renew", Action: "renew", Label: l("◇ Продлить", "◇ Renew"), On: true},
-			{ID: "support", Action: "support", Label: l("◌ Поддержка", "◌ Support"), On: true, Row: true},
-			{ID: "app", Action: "app", Label: l("◎ Открыть страницу подписки", "◎ Open the subscription page"), On: true},
+			{ID: "buy", Action: "buy", Label: l("◇ Купить", "◇ Buy"), On: true},
+			{ID: "renew", Action: "renew", Label: l("↻ Продлить", "↻ Renew"), On: true},
 		},
 		Notify:     Notify{Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
 		MiniApp:    true,
@@ -114,32 +112,38 @@ var (
 
 // Validate checks a config from the admin panel and fills in defaults.
 func (c *Config) Validate() error {
-	legacy := false
-	hasSubscriptions := false
-	for i := range c.Buttons {
-		button := &c.Buttons[i]
-		if button.Action == "sub" {
-			legacy = true
-			button.Action, button.ID = "profile", "profile"
-			switch button.Label {
-			case "📊 Подписка", "Моя подписка", "📊 Subscription":
-				button.Label = "◉ Профиль"
-				if c.Lang == "en" {
-					button.Label = "◉ Profile"
-				}
+	if c.MenuVersion < 2 {
+		buttons := []MenuButton{}
+		for _, button := range c.Buttons {
+			if button.Action == "sub" {
+				button.Action, button.ID, button.Label = "profile", "profile", "◉ Профиль"
+			}
+			if button.Action == "profile" || button.Action == "renew" || button.Action == "buy" || button.Action == "url" || button.Action == "page" {
+				buttons = append(buttons, button)
 			}
 		}
-		if button.Action == "subscriptions" {
-			hasSubscriptions = true
+		found := false
+		for _, button := range buttons {
+			if button.Action == "buy" {
+				found = true
+			}
+		}
+		if !found {
+			buttons = append(buttons, Default(c.Lang).Buttons[1])
+		}
+		c.Buttons = buttons
+		c.MenuVersion = 2
+		if strings.Contains(c.Texts.Main, "{state}") && strings.Contains(c.Texts.Main, "{term}") {
+			c.Texts.Main = DefaultTexts(c.Lang).Main
 		}
 	}
-	if legacy && !hasSubscriptions && len(c.Buttons) < maxButtons {
-		label := "▤ Мои подписки"
-		if c.Lang == "en" {
-			label = "▤ My subscriptions"
+	filtered := []MenuButton{}
+	for _, button := range c.Buttons {
+		if button.Action != "subscriptions" {
+			filtered = append(filtered, button)
 		}
-		c.Buttons = append(c.Buttons, MenuButton{ID: "subscriptions", Action: "subscriptions", Label: label, On: true})
 	}
+	c.Buttons = filtered
 
 	if c.Lang != "en" {
 		c.Lang = "ru"

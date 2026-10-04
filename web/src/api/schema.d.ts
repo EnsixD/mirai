@@ -1586,6 +1586,8 @@ export interface components {
              * @enum {string}
              */
             lang: "ru" | "en";
+            /** Format: int64 */
+            menu_version: number;
             /** @description Кнопка Mini App со страницей подписки */
             mini_app: boolean;
             notify: components["schemas"]["Notify"];
@@ -1628,6 +1630,14 @@ export interface components {
             tariff_id: number;
             /** Format: int64 */
             telegram_id?: number;
+        };
+        DeviceResetPolicy: {
+            all: boolean;
+            /** Format: int64 */
+            limit: number;
+            /** Format: int64 */
+            period_days: number;
+            single: boolean;
         };
         DeviceView: {
             /** Format: date-time */
@@ -1870,7 +1880,7 @@ export interface components {
         };
         MenuButton: {
             /** @enum {string} */
-            action: "profile" | "subscriptions" | "sub" | "devices" | "connect" | "renew" | "support" | "app" | "url" | "page";
+            action: "profile" | "buy" | "sub" | "devices" | "connect" | "renew" | "support" | "app" | "url" | "page";
             /** @description Постоянный id кнопки */
             id: string;
             label: string;
@@ -2173,6 +2183,7 @@ export interface components {
             /** Format: int64 */
             admin_id?: number;
             config?: components["schemas"]["Config"];
+            device_reset?: components["schemas"]["DeviceResetPolicy"];
             enabled?: boolean;
             infrastructure?: components["schemas"]["AlertsConfigPatch"];
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
@@ -2785,6 +2796,7 @@ export interface components {
             config: components["schemas"]["Config"];
             /** @description Встроенные тексты на языке бота: пустое поле берёт их */
             defaults: components["schemas"]["Texts"];
+            device_reset: components["schemas"]["DeviceResetPolicy"];
             enabled: boolean;
             /** @description token_invalid, token_revoked, unreachable или ответ Telegram */
             error?: string;
