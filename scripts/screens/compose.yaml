@@ -1,0 +1,48 @@
+# A demo panel with its node for the README screenshots (scripts/screens/shoot.mjs).
+# Only the panel's port leaves Docker, on 127.0.0.1; the node's VPN ports stay inside.
+name: mirai-screens
+
+services:
+  node:
+    image: ${MIRAI_IMAGE:-mirai:dev}
+    entrypoint: ["/usr/local/bin/mirai-node"]
+    environment:
+      MIRAI_DATA_DIR: /data/node
+    volumes: ["data:/data", "run:/run/mirai"]
+
+  panel:
+    image: ${MIRAI_IMAGE:-mirai:dev}
+    depends_on:
+      node: {condition: service_started}
+      postgres: {condition: service_healthy}
+    environment:
+      MIRAI_DATA_DIR: /data/panel
+      MIRAI_PANEL_LISTEN: 0.0.0.0:2053
+      MIRAI_DATABASE_URL: postgresql://mirai:${MIRAI_TEST_POSTGRES_PASSWORD:?set demo database password}@localhost/mirai?host=/run/postgresql
+    ports: ["127.0.0.1:2090:2053"]
+    volumes: ["data:/data", "run:/run/mirai", "pg-run:/run/postgresql"]
+
+  # As the installer runs it (installer/src/docker.rs): no network, the panel talks to it
+  # over the shared unix socket with a scram-sha-256 password.
+  postgres:
+    image: postgres:18-alpine
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: mirai
+      POSTGRES_DB: mirai
+      POSTGRES_PASSWORD: ${MIRAI_TEST_POSTGRES_PASSWORD:?set demo database password}
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777"]
+    volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/run/postgresql", "-U", "mirai", "-d", "mirai"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  pg-data: {}
+  pg-run: {}
+  data: {}
+  run: {}
