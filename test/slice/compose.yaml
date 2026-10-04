@@ -1,0 +1,102 @@
+name: mirai-slice
+
+services:
+  node:
+    build: {context: ../.., dockerfile: Dockerfile}
+    image: mirai:slice
+    entrypoint: ["/usr/local/bin/mirai-node"]
+    environment:
+      MIRAI_DATA_DIR: /data/node
+      # the test target lives on a private docker network
+      MIRAI_ALLOW_PRIVATE: "true"
+    volumes: ["data:/data", "run:/run/mirai"]
+    # The panel takes a public host only as an IP or a full domain name.
+    networks:
+      default:
+        aliases: [node.test]
+
+  panel:
+    image: mirai:slice
+    depends_on:
+      node: {condition: service_started}
+      postgres: {condition: service_healthy}
+    environment:
+      MIRAI_DATA_DIR: /data/panel
+      MIRAI_PANEL_LISTEN: 0.0.0.0:2053
+      MIRAI_DATABASE_URL: postgresql://mirai:${MIRAI_TEST_POSTGRES_PASSWORD:?set test database password}@localhost/mirai?host=/run/postgresql
+      # The automatic moves' windows in seconds instead of half hours.
+      MIRAI_AUTOTUNE_SCALE: "0.01"
+    volumes: ["data:/data", "run:/run/mirai", "pg-run:/run/postgresql"]
+
+  # As the installer runs it (installer/src/docker.rs): no network, the panel talks to it
+  # over the shared unix socket with a scram-sha-256 password.
+  postgres:
+    image: postgres:18-alpine
+    network_mode: none
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: mirai
+      POSTGRES_DB: mirai
+      POSTGRES_PASSWORD: ${MIRAI_TEST_POSTGRES_PASSWORD:?set test database password}
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    command: ["postgres", "-c", "listen_addresses=", "-c", "unix_socket_directories=/run/postgresql", "-c", "unix_socket_permissions=0777"]
+    volumes: ["pg-data:/var/lib/postgresql", "pg-run:/run/postgresql"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/run/postgresql", "-U", "mirai", "-d", "mirai"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # A remote node: the panel reaches it over mTLS by the name it was added with.
+  node2:
+    image: mirai:slice
+    entrypoint: ["sh", "-c", "MIRAI_NODE_JOIN=$$(cat /work/node2.key) exec /usr/local/bin/mirai-node"]
+    environment:
+      MIRAI_DATA_DIR: /data/node
+      MIRAI_ALLOW_PRIVATE: "true"
+    volumes: ["work:/work:ro", "data2:/data"]
+    networks:
+      default:
+        aliases: [node2.slice]
+    profiles: ["node2"]
+
+  target:
+    build: {context: ../.., dockerfile: test/e2e/Dockerfile}
+    command: ["target"]
+
+  client:
+    image: metacubex/mihomo:v1.19.31
+    command: ["-d", "/tmp/mihomo", "-f", "/work/client.yaml"]
+    volumes: ["work:/work:ro"]
+    profiles: ["client"]
+
+  # Plays the client's ISP: inside the client's network namespace it drops the client's
+  # packets to the node's 443/tcp, like the DPI that blocks one port of a server.
+  blocker:
+    image: alpine:3
+    network_mode: "service:client"
+    cap_add: [NET_ADMIN]
+    entrypoint: ["sh", "-c"]
+    command:
+      - apk add -q iptables >/dev/null && iptables -I OUTPUT -p tcp -d "$$(getent hosts node | cut -d' ' -f1)" --dport 443 -j REJECT --reject-with tcp-reset && echo "client → node:443/tcp dropped"
+    profiles: ["blocker"]
+
+  driver:
+    image: golang:1.27
+    working_dir: /src
+    command: ["sleep", "infinity"]
+    volumes:
+      - "../..:/src:ro"
+      - "work:/work"
+      - "mirai-gomod:/go/pkg/mod"
+      - "mirai-gocache:/root/.cache/go-build"
+
+volumes:
+  pg-data: {}
+  pg-run: {}
+  data: {}
+  data2: {}
+  run: {}
+  work: {}
+  mirai-gomod: {external: true}
+  mirai-gocache: {external: true}
