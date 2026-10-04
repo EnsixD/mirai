@@ -190,6 +190,7 @@ func (b *Bot) Config(ctx context.Context) Config {
 	def := Default(lang)
 	def.Buttons = nil
 	def.MenuVersion = 0
+	def.Admin.Version = 0
 	cfg, ok, err := settings.GetOver(ctx, b.d.Settings, KeyConfig, def)
 	if err != nil || !ok {
 		return Default(lang)

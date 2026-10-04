@@ -9,7 +9,17 @@ import (
 
 // Config is what the admin sets up in the panel: the menu, the texts and which
 // notifications go out. It is stored as one JSON setting.
+type AdminMenuButton struct {
+	ID     string `json:"id"`
+	Action string `json:"action" enum:"users,subscriptions,search,grant"`
+	Label  string `json:"label" maxLength:"40"`
+	On     bool   `json:"on"`
+	Row    bool   `json:"row"`
+}
 type AdminMenuConfig struct {
+	Buttons []AdminMenuButton `json:"buttons"`
+	Version int               `json:"version"`
+
 	Enabled       bool `json:"enabled"`
 	Users         bool `json:"users"`
 	Subscriptions bool `json:"subscriptions"`
@@ -45,7 +55,7 @@ type MenuButton struct {
 // Texts the admin writes. Variables: {name} {brand} {until} {days} {used} {left} {limit}
 // {devices} {reset}; an empty text is the built-in one.
 type Texts struct {
-	Welcome    string `json:"welcome" doc:"Для тех, у кого ещё нет подписки в боте"`
+	Welcome    string `json:"welcome" doc:"Сообщение /start с информацией о VPN и кнопками главного меню"`
 	Main       string `json:"main" doc:"Шапка главного меню"`
 	Renew      string `json:"renew" doc:"Экран «Продлить»"`
 	Expiring   string `json:"expiring" doc:"Уведомление: подписка скоро закончится"`
@@ -78,13 +88,13 @@ func Default(lang string) Config {
 	}
 	return Config{
 		Lang:        lang,
-		MenuVersion: 2,
+		MenuVersion: 3,
 		Texts:       DefaultTexts(lang),
-		Admin:       AdminMenuConfig{Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
+		Admin:       AdminMenuConfig{Version: 1, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
 		Buttons: []MenuButton{
-			{ID: "profile", Action: "profile", Label: l("◉ Профиль", "◉ Profile"), On: true},
-			{ID: "buy", Action: "buy", Label: l("◇ Купить", "◇ Buy"), On: true},
-			{ID: "renew", Action: "renew", Label: l("↻ Продлить", "↻ Renew"), On: true},
+			{ID: "profile", Action: "profile", Label: l("👤 Профиль", "👤 Profile"), On: true},
+			{ID: "renew", Action: "renew", Label: l("💳 Продлить", "💳 Renew"), On: true},
+			{ID: "buy", Action: "buy", Label: l("🛒 Купить", "🛒 Buy"), On: true},
 		},
 		Notify:     Notify{Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
 		MiniApp:    true,
@@ -116,7 +126,7 @@ func (c *Config) Validate() error {
 		buttons := []MenuButton{}
 		for _, button := range c.Buttons {
 			if button.Action == "sub" {
-				button.Action, button.ID, button.Label = "profile", "profile", "◉ Профиль"
+				button.Action, button.ID, button.Label = "profile", "profile", "👤 Профиль"
 			}
 			if button.Action == "profile" || button.Action == "renew" || button.Action == "buy" || button.Action == "url" || button.Action == "page" {
 				buttons = append(buttons, button)
@@ -129,12 +139,71 @@ func (c *Config) Validate() error {
 			}
 		}
 		if !found {
-			buttons = append(buttons, Default(c.Lang).Buttons[1])
+			buttons = append(buttons, Default(c.Lang).Buttons[2])
 		}
 		c.Buttons = buttons
 		c.MenuVersion = 2
 		if strings.Contains(c.Texts.Main, "{state}") && strings.Contains(c.Texts.Main, "{term}") {
 			c.Texts.Main = DefaultTexts(c.Lang).Main
+		}
+	}
+	if c.MenuVersion < 3 {
+		for i := range c.Buttons {
+			if c.Buttons[i].Action == "buy" && i > 0 && c.Buttons[i-1].Action == "renew" {
+				break
+			}
+			if c.Buttons[i].Action == "buy" {
+				for j := i + 1; j < len(c.Buttons); j++ {
+					if c.Buttons[j].Action == "renew" {
+						c.Buttons[i], c.Buttons[j] = c.Buttons[j], c.Buttons[i]
+						break
+					}
+				}
+				break
+			}
+		}
+		c.MenuVersion = 3
+		c.Texts.Main = strings.ReplaceAll(c.Texts.Main, " · {name}", "")
+		if strings.Contains(c.Texts.Welcome, "в «Моих подписках»") {
+			c.Texts.Welcome = DefaultTexts(c.Lang).Welcome
+		}
+	}
+	if c.Admin.Version < 1 {
+		c.Admin.Buttons = defaultAdminButtons()
+		for i := range c.Admin.Buttons {
+			button := &c.Admin.Buttons[i]
+			button.On = map[string]bool{"users": c.Admin.Users, "subscriptions": c.Admin.Subscriptions, "search": c.Admin.Search, "grant": c.Admin.Grant}[button.Action]
+		}
+		c.Admin.Version = 1
+	}
+	seenAdmin := map[string]bool{}
+	if len(c.Admin.Buttons) > 4 {
+		return ErrButtons
+	}
+	c.Admin.Users = false
+	c.Admin.Subscriptions = false
+	c.Admin.Search = false
+	c.Admin.Grant = false
+	for i := range c.Admin.Buttons {
+		button := &c.Admin.Buttons[i]
+		if !contains([]string{"users", "subscriptions", "search", "grant"}, button.Action) || seenAdmin[button.Action] {
+			return ErrButtons
+		}
+		seenAdmin[button.Action] = true
+		button.ID = button.Action
+		button.Label = strings.TrimSpace(button.Label)
+		if button.Label == "" || utf8.RuneCountInString(button.Label) > 40 {
+			return ErrButtonLabel
+		}
+		switch button.Action {
+		case "users":
+			c.Admin.Users = button.On
+		case "subscriptions":
+			c.Admin.Subscriptions = button.On
+		case "search":
+			c.Admin.Search = button.On
+		case "grant":
+			c.Admin.Grant = button.On
 		}
 	}
 	filtered := []MenuButton{}
@@ -154,9 +223,113 @@ func (c *Config) Validate() error {
 	seen := map[string]bool{}
 	for i := range c.Buttons {
 		b := &c.Buttons[i]
-		stock := map[string]string{"👤 Профиль": "◉ Профиль", "👤 Profile": "◉ Profile", "📋 Мои подписки": "▤ Мои подписки", "📋 My subscriptions": "▤ My subscriptions", "📱 Устройства": "▣ Устройства", "📱 Devices": "▣ Devices", "🔌 Подключить устройство": "↗ Подключить устройство", "🔌 Connect a device": "↗ Connect a device", "💳 Продлить": "◇ Продлить", "💳 Renew": "◇ Renew", "💬 Поддержка": "◌ Поддержка", "💬 Support": "◌ Support", "🌐 Открыть страницу подписки": "◎ Открыть страницу подписки", "🌐 Open the subscription page": "◎ Open the subscription page"}
-		if next, ok := stock[b.Label]; ok {
-			b.Label = next
+		if b.Label == "👤 Профиль" {
+			b.Label = "👤 Профиль"
+		}
+		if b.Label == "👤 Profile" {
+			b.Label = "👤 Profile"
+		}
+		if b.Label == "🛒 Купить" {
+			b.Label = "🛒 Купить"
+		}
+		if b.Label == "🛒 Buy" {
+			b.Label = "🛒 Buy"
+		}
+		if b.Label == "💳 Продлить" {
+			b.Label = "💳 Продлить"
+		}
+		if b.Label == "💳 Продлить" {
+			b.Label = "💳 Продлить"
+		}
+		if b.Label == "💳 Renew" {
+			b.Label = "💳 Renew"
+		}
+		if b.Label == "💳 Renew" {
+			b.Label = "💳 Renew"
+		}
+		if b.Label == "📱 Устройства" {
+			b.Label = "📱 Устройства"
+		}
+		if b.Label == "📱 Devices" {
+			b.Label = "📱 Devices"
+		}
+		if b.Label == "🔌 Подключить устройство" {
+			b.Label = "🔌 Подключить устройство"
+		}
+		if b.Label == "🔌 Connect a device" {
+			b.Label = "🔌 Connect a device"
+		}
+		if b.Label == "💬 Поддержка" {
+			b.Label = "💬 Поддержка"
+		}
+		if b.Label == "💬 Support" {
+			b.Label = "💬 Support"
+		}
+		if b.Label == "🌐 Открыть страницу подписки" {
+			b.Label = "🌐 Открыть страницу подписки"
+		}
+		if b.Label == "🌐 Open the subscription page" {
+			b.Label = "🌐 Open the subscription page"
+		}
+		if b.Label == "⚙️ Админ-панель" {
+			b.Label = "⚙️ Админ-панель"
+		}
+		if b.Label == "👥 Пользователи" {
+			b.Label = "👥 Пользователи"
+		}
+		if b.Label == "📋 Все подписки" {
+			b.Label = "📋 Все подписки"
+		}
+		if b.Label == "🔎 Поиск" {
+			b.Label = "🔎 Поиск"
+		}
+		if b.Label == "🎁 Выдать подписку" {
+			b.Label = "🎁 Выдать подписку"
+		}
+		if b.Label == "📋 Подписок" {
+			b.Label = "📋 Подписок"
+		}
+		if b.Label == "💳 Потрачено" {
+			b.Label = "💳 Потрачено"
+		}
+		if b.Label == "💳 Spent" {
+			b.Label = "💳 Spent"
+		}
+		if b.Label == "◉ Профиль" {
+			b.Label = "👤 Профиль"
+		}
+		if b.Label == "◉ Profile" {
+			b.Label = "👤 Profile"
+		}
+		if b.Label == "◇ Купить" {
+			b.Label = "🛒 Купить"
+		}
+		if b.Label == "◇ Buy" {
+			b.Label = "🛒 Buy"
+		}
+		if b.Label == "↻ Продлить" {
+			b.Label = "💳 Продлить"
+		}
+		if b.Label == "◇ Продлить" {
+			b.Label = "💳 Продлить"
+		}
+		if b.Label == "↻ Renew" {
+			b.Label = "💳 Renew"
+		}
+		if b.Label == "◇ Renew" {
+			b.Label = "💳 Renew"
+		}
+		if b.Label == "▣ Устройства" {
+			b.Label = "📱 Устройства"
+		}
+		if b.Label == "↗ Подключить устройство" {
+			b.Label = "🔌 Подключить устройство"
+		}
+		if b.Label == "◌ Поддержка" {
+			b.Label = "💬 Поддержка"
+		}
+		if b.Label == "◎ Открыть страницу подписки" {
+			b.Label = "🌐 Открыть страницу подписки"
 		}
 		b.Label = strings.TrimSpace(b.Label)
 		if b.Label == "" || utf8.RuneCountInString(b.Label) > maxLabel {
@@ -233,4 +406,8 @@ func itoa(n int) string {
 		b = append([]byte{byte('0' + n%10)}, b...)
 	}
 	return string(b)
+}
+
+func defaultAdminButtons() []AdminMenuButton {
+	return []AdminMenuButton{{ID: "users", Action: "users", Label: "👥 Пользователи", On: true}, {ID: "subscriptions", Action: "subscriptions", Label: "📋 Все подписки", On: true}, {ID: "search", Action: "search", Label: "🔎 Поиск", On: true}, {ID: "grant", Action: "grant", Label: "🎁 Выдать подписку", On: true}}
 }

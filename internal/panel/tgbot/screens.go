@@ -53,13 +53,16 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if account, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && account.FirstName != "" {
 			name = account.FirstName
 		}
-		text := render(pick(cfg.Texts.Main, w.main), map[string]string{"brand": b.brand(ctx), "name": name})
+		text := render(pick(cfg.Texts.Welcome, w.welcome), map[string]string{"brand": b.brand(ctx), "name": name})
 		if notice != "" {
 			text = html.EscapeString(notice) + "\n\n" + text
 		}
 		kb := b.menu(ctx, cfg, w, len(list))
 		b.addAdminButton(ctx, chat, kb)
 		return text, kb
+	}
+	if !ok && cmd == "w" {
+		return "📋 Мои подписки\n\nУ вас пока нет подписок.", &Keyboard{[][]Button{{{Text: w.back, CallbackData: "pf"}}}}
 	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, chat, notice)
@@ -89,7 +92,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			lines = append(lines, html.EscapeString(fmt.Sprintf(w.resets, r)))
 		}
 		lines = append(lines, "📱 "+html.EscapeString(vars["devices"]))
-		rows := [][]Button{{{Text: "▣ " + w.devicesTitle, CallbackData: "d"}}}
+		rows := [][]Button{{{Text: fmt.Sprintf("📱 %s (%d)", w.devicesTitle, func() int64 { n, _ := b.d.Store.Q.CountBoundDevices(ctx, u.ID); return n }()), CallbackData: "d"}}}
 		back = []Button{{Text: w.back, CallbackData: "pf"}}
 		return withNotice(strings.Join(lines, "\n")), &Keyboard{append(rows, back)}
 	case "x", "xk", "xp":
@@ -131,16 +134,10 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			page = 0
 		}
 		rows := [][]Button{}
-		lines := []string{"<b>" + html.EscapeString(w.subscriptions) + "</b>"}
+		lines := []string{"<b>📋 Мои подписки</b>"}
 		end := min((page+1)*8, len(list))
 		for _, subscription := range list[page*8 : end] {
-			values := b.vars(ctx, w, subscription, now)
-			mark := ""
-			if subscription.ID == u.ID {
-				mark = "✓ "
-			}
-			lines = append(lines, "\n<b>"+html.EscapeString(subscription.Name)+"</b>\n"+html.EscapeString(values["state"])+"\n📅 "+html.EscapeString(values["term"])+"\n📦 "+html.EscapeString(values["traffic"]))
-			rows = append(rows, []Button{{Text: mark + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
+			rows = append(rows, []Button{{Text: "📋 " + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
 		}
 		nav := []Button{}
 		if page > 0 {
@@ -152,7 +149,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
-		return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
+		return strings.Join(lines, "\n"), &Keyboard{append(rows, []Button{{Text: w.back, CallbackData: "pf"}})}
 	}
 	kb := b.menu(ctx, cfg, w, len(list))
 	b.addAdminButton(ctx, chat, kb)
@@ -166,9 +163,9 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 		text = html.EscapeString(notice) + "\n\n" + text
 	}
 	var rows [][]Button
-	profileLabel := "◉ Профиль"
+	profileLabel := "👤 Профиль"
 	if cfg.Lang == "en" {
-		profileLabel = "◉ Profile"
+		profileLabel = "👤 Profile"
 	}
 	rows = append(rows, []Button{{Text: profileLabel, CallbackData: "pf"}})
 	if b.d.Billing != nil && b.d.Billing.TrialOpen(ctx, chat) {
@@ -292,12 +289,12 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		meta = append(meta, w.ago(time.Unix(d.LastSeen, 0), now))
 		lines = append(lines, fmt.Sprintf("%d. %s — %s", i+1, html.EscapeString(name(d)), html.EscapeString(strings.Join(meta, " · "))))
 		if policy.Single || admin {
-			rows = append(rows, []Button{{Text: "× " + name(d), CallbackData: "dc:" + strconv.FormatInt(d.ID, 10)}})
+			rows = append(rows, []Button{{Text: "📱 " + name(d), CallbackData: "du:" + strconv.FormatInt(d.ID, 10)}})
 		}
 	}
 	if len(devs) > 0 {
 		if policy.All || admin {
-			rows = append(rows, []Button{{Text: "↻ Очистить все устройства", CallbackData: "da"}})
+			rows = append(rows, []Button{{Text: "🧹 Очистить все устройства", CallbackData: "da"}})
 		}
 		if !admin {
 			lines = append(lines, "", fmt.Sprintf("Лимит: %d очистки за %d дней. Очистка всех устройств считается одной операцией.", policy.Limit, policy.PeriodDays))

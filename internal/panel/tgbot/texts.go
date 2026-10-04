@@ -41,8 +41,8 @@ type words struct {
 }
 
 var ru = words{
-	welcome:    "Добро пожаловать в {brand}.\n\nВ профиле — история покупок, в «Моих подписках» — подключения, срок и трафик. Выберите тариф или попробуйте сервис бесплатно, если пробный период доступен.\n\nУже есть подписка? Пришлите её ссылку сюда, чтобы привязать к своему аккаунту.",
-	main:       "{brand} · {name}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
+	welcome:    "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
+	main:       "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
 	renew:      "Продление подписки «{name}».\n\nВыберите срок и оплатите — оплаченные дни добавятся к оставшемуся сроку. Если тарифы сейчас недоступны, обратитесь в поддержку.",
 	expiring:   "⏳ Подписка «{name}» заканчивается {until}: осталось {days}.",
 	expired:    "⛔️ Подписка «{name}» закончилась. Чтобы продлить, напишите в поддержку.",
@@ -113,7 +113,7 @@ var ru = words{
 
 var en = words{
 	welcome:    "This is the {brand} bot.\n\nTo manage your subscription, open its page and tap “Open in Telegram”, or send the subscription link here.",
-	main:       "{brand} · {name}\n\nSecure, convenient internet access. Choose an action below.",
+	main:       "{brand}\n\nSecure, convenient internet access. Choose an action below.",
 	renew:      "To renew your subscription, message support: they will tell you how to pay.",
 	expiring:   "⏳ Subscription “{name}” ends {until}: {days} left.",
 	expired:    "⛔️ Subscription “{name}” has ended. Message support to renew it.",

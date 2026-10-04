@@ -1348,13 +1348,24 @@ export interface components {
             /** @description Панель видит каталог данных сервера; иначе ставить адаптеры нельзя */
             supported: boolean;
         };
+        AdminMenuButton: {
+            /** @enum {string} */
+            action: "users" | "subscriptions" | "search" | "grant";
+            id: string;
+            label: string;
+            on: boolean;
+            row: boolean;
+        };
         AdminMenuConfig: {
+            buttons: components["schemas"]["AdminMenuButton"][];
             enabled: boolean;
             grant: boolean;
             search: boolean;
             statistics: boolean;
             subscriptions: boolean;
             users: boolean;
+            /** Format: int64 */
+            version: number;
         };
         AdminView: {
             /** Format: int64 */
@@ -2863,7 +2874,7 @@ export interface components {
             traffic_90: string;
             /** @description Уведомление: трафик закончился */
             traffic_end: string;
-            /** @description Для тех, у кого ещё нет подписки в боте */
+            /** @description Сообщение /start с информацией о VPN и кнопками главного меню */
             welcome: string;
         };
         TopUser: {

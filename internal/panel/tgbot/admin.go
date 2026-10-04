@@ -35,7 +35,7 @@ func (b *Bot) isAdmin(ctx context.Context, sender, chat int64) bool {
 
 func (b *Bot) addAdminButton(ctx context.Context, chat int64, kb *Keyboard) {
 	if kb != nil && b.isAdmin(ctx, chat, chat) {
-		kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: "◎ Админ-панель", CallbackData: "a:home"}})
+		kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: "⚙️ Админ-панель", CallbackData: "a:home"}})
 	}
 }
 
@@ -225,7 +225,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		text := fmt.Sprintf("<b>%s</b>\n@%s\nTelegram ID: <code>%d</code>\nПодписки пока нет.", html.EscapeString(account.FirstName), html.EscapeString(account.Username), id)
 		rows := [][]Button{}
 		if b.Config(ctx).Admin.Grant {
-			rows = append(rows, []Button{adminButton("＋ Выдать подписку", fmt.Sprintf("grant:%d", id))})
+			rows = append(rows, []Button{adminButton("🎁 Выдать подписку", fmt.Sprintf("grant:%d", id))})
 		}
 		return text, adminKB(append(rows, adminBack())...)
 	case "tariffs":
@@ -290,17 +290,20 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		}
 		config := b.Config(ctx).Admin
 		rows := [][]Button{}
-		if config.Users {
-			rows = append(rows, []Button{adminButton("▤ Пользователи", "users:0")})
-		}
-		if config.Subscriptions {
-			rows = append(rows, []Button{adminButton("▣ Все подписки", "subs:0")})
-		}
-		if config.Search {
-			rows = append(rows, []Button{adminButton("⌕ Поиск", "search")})
-		}
-		if config.Grant {
-			rows = append(rows, []Button{adminButton("＋ Выдать подписку", "grant")})
+		for _, button := range config.Buttons {
+			if !button.On {
+				continue
+			}
+			target := map[string]string{"users": "users:0", "subscriptions": "subs:0", "search": "search", "grant": "grant"}[button.Action]
+			if target == "" {
+				continue
+			}
+			entry := adminButton(button.Label, target)
+			if button.Row && len(rows) > 0 && len(rows[len(rows)-1]) < 3 {
+				rows[len(rows)-1] = append(rows[len(rows)-1], entry)
+			} else {
+				rows = append(rows, []Button{entry})
+			}
 		}
 		rows = append(rows, []Button{{Text: "← Меню бота", CallbackData: "m"}})
 		text := "<b>⚙ Администрирование mirai</b>"

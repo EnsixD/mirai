@@ -43,18 +43,16 @@ func (b *Bot) customerProfile(ctx context.Context, cfg Config, chat int64, subsc
 		}
 	}
 	duration := fmt.Sprintf(tr("%d дн. (%d мес. и %d дн.)", "%d days (%d months and %d days)"), totals.Days, totals.Days/30, totals.Days%30)
-	lines := []string{"<b>" + tr("◉ Профиль", "◉ Profile") + "</b>", html.EscapeString(name), "ID: <code>" + strconv.FormatInt(chat, 10) + "</code>", "",
-		fmt.Sprintf(tr("◇ Потрачено: %d,%02d ₽", "◇ Spent: %d.%02d RUB"), totals.RublesKopecks/100, totals.RublesKopecks%100),
+	lines := []string{"<b>" + tr("👤 Профиль", "👤 Profile") + "</b>", html.EscapeString(name), "ID: <code>" + strconv.FormatInt(chat, 10) + "</code>", "",
+		fmt.Sprintf(tr("💳 Потрачено: %d,%02d ₽", "💳 Spent: %d.%02d RUB"), totals.RublesKopecks/100, totals.RublesKopecks%100),
 		"📅 " + tr("Куплено подписки: ", "Subscription purchased: ") + duration,
 		fmt.Sprintf(tr("🧾 Покупок и продлений: %d", "🧾 Purchases and renewals: %d"), totals.Purchases),
-		fmt.Sprintf(tr("▤ Подписок: %d · активных: %d", "▤ Subscriptions: %d · active: %d"), len(subscriptions), active)}
+		fmt.Sprintf(tr("📋 Подписок: %d · активных: %d", "▤ Subscriptions: %d · active: %d"), len(subscriptions), active)}
 	if totals.Unlimited > 0 {
 		lines = append(lines, fmt.Sprintf(tr("♾ Бессрочных покупок: %d", "♾ Unlimited purchases: %d"), totals.Unlimited))
 	}
 	lines = append(lines, "", tr("Учтены завершённые покупки без возвратов. Бесплатные и выданные администратором подписки не входят в оплаченный срок. Месяц в статистике — 30 дней.", "Completed purchases excluding refunds. Free and administrator-issued subscriptions do not count as purchased time. A month here is 30 days."))
 	rows := [][]Button{}
-	for _, subscription := range subscriptions {
-		rows = append(rows, []Button{{Text: "▣ " + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
-	}
+	rows = append(rows, []Button{{Text: tr("📋 Мои подписки", "📋 My subscriptions"), CallbackData: "w"}})
 	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
 }
