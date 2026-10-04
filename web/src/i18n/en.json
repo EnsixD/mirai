@@ -320,6 +320,8 @@
       "bad_price": "The price is out of range",
       "note_too_long": "Up to 200 characters",
       "domain_elsewhere": "The domain points to another server ({value}). Point its A record at this server and wait for DNS to update.",
+      "invalid_subscription_url": "Specify a valid subscription URL (e.g. https://subs.example.com).",
+      "routing_profile_invalid": "Invalid routing rules URL.",
       "subscription_root_only": "Specify only protocol and domain or IP without path (e.g. https://subs.example.com).",
       "domain_not_found": "The domain has no A or AAAA record. Point it at this server and wait for DNS to update.",
       "server_ip_unknown": "Set the server's IP address first: there is nothing to compare the domain with.",

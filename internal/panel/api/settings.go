@@ -225,7 +225,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	b := in.Body
 	if b.SubPublicURL != nil {
 		if err := settings.ValidateSubscriptionURL(strings.TrimSpace(*b.SubPublicURL)); err != nil {
-			return nil, huma.Error422UnprocessableEntity("invalid_subscription_url")
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.sub_public_url", Message: "invalid_subscription_url"})
 		}
 	}
 	if b.SubPublicURL != nil && strings.TrimSpace(*b.SubPublicURL) != "" {

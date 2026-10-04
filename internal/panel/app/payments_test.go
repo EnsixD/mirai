@@ -211,7 +211,7 @@ func TestPaymentsOverHTTP(t *testing.T) {
 		len(offers.Addons) != 1 || offers.Addons[0].Provider != "addon:yookassa" {
 		t.Fatalf("shop: %d %s", resp.StatusCode, body)
 	}
-	if resp, _ := h.do(http.MethodPost, shop, map[string]any{"init_data": initData("987654321:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw1", 555, h.now)}, same); resp.StatusCode != http.StatusUnauthorized {
+	if resp, _ := h.do(http.MethodPost, shop, map[string]any{"init_data": initData(foreignToken, 555, h.now)}, same); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("another bot's signature: %d", resp.StatusCode)
 	}
 	if resp, _ := h.do(http.MethodPost, pay, map[string]any{"init_data": initData(tgToken, 555, h.now), "tariff_id": sale.ID, "provider": "addon:yookassa"}, map[string]string{"Sec-Fetch-Site": "cross-site"}); resp.StatusCode != http.StatusNotFound {
