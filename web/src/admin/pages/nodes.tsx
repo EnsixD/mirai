@@ -430,6 +430,7 @@ function EditNodeDrawer({ node, onClose }: { node: Node | null; onClose: () => v
   };
   return (
     <Drawer
+      presentation="modal"
       open={!!node}
       onOpenChange={(v) => !v && onClose()}
       title={node ? nodeLabel(node) : ""}

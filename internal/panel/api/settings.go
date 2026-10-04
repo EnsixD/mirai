@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -226,6 +228,19 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			return nil, huma.Error422UnprocessableEntity("invalid_subscription_url")
 		}
 	}
+	if b.SubPublicURL != nil && strings.TrimSpace(*b.SubPublicURL) != "" {
+		u, _ := url.Parse(strings.TrimSpace(*b.SubPublicURL))
+		if u.Path != "" && u.Path != "/" {
+			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.sub_public_url", Message: "subscription_root_only"})
+		}
+		if _, err := netip.ParseAddr(u.Hostname()); err != nil {
+			host, _ := h.d.Settings.String(ctx, settings.KeyPublicHost)
+			if detail := h.domainHere(ctx, "body.sub_public_url", u.Hostname(), dnscheck.Own(host)); detail != nil {
+				return nil, huma.Error422UnprocessableEntity("validation", detail)
+			}
+		}
+	}
+
 	for field, value := range map[string]*string{"sub_happ_rules": b.HappRules, "sub_incy_rules": b.INCYRules} {
 		if value != nil {
 			app := "happ"

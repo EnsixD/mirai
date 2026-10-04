@@ -65,7 +65,7 @@ export function SettingsPage() {
                 }
               />
             ) : tab === "rules" ? (
-              <div className="grid w-full items-start gap-4 xl:grid-cols-3">
+              <div className="flex w-full flex-col gap-4">
                 <ClientRoutingCard client="happ" s={s} />
                 <ClientRoutingCard client="incy" s={s} />
                 <ClashRulesCard s={s} />

@@ -34,6 +34,7 @@ func JoinCommand(key string) string { return InstallCommand + " -s -- --join " +
 const LatestURL = "https://github.com/" + Repo + "/releases/latest/download/manifest.json"
 
 type Manifest struct {
+	Native       map[string]Asset  `json:"native,omitempty" doc:"Архив нативных Linux-бинарников по архитектуре"`
 	Version      string            `json:"version"`
 	MinInstaller string            `json:"min_installer,omitempty"`
 	Published    time.Time         `json:"published"`
@@ -93,8 +94,15 @@ func Parse(data []byte, sig string, pub ed25519.PublicKey) (Manifest, error) {
 	if Newer(m.MinInstaller, m.Version) {
 		return m, errors.New("release: minimum installer is newer than the release")
 	}
-	if !digestRe.MatchString(m.Digest) || !validImage(m.Image) {
-		return m, fmt.Errorf("release: image %s@%s", m.Image, m.Digest)
+	if len(m.Native) == 0 || m.Image != "" || m.Digest != "" {
+		if !digestRe.MatchString(m.Digest) || !validImage(m.Image) {
+			return m, fmt.Errorf("release: image %s@%s", m.Image, m.Digest)
+		}
+	}
+	for arch, a := range m.Native {
+		if !sha256Re.MatchString(a.SHA256) || !strings.HasPrefix(a.URL, "https://") {
+			return m, fmt.Errorf("release: native asset for %s", arch)
+		}
 	}
 	for arch, a := range m.Installer {
 		if !sha256Re.MatchString(a.SHA256) || !strings.HasPrefix(a.URL, "https://") {
