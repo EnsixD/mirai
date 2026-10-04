@@ -26,21 +26,25 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	w := wordsFor(cfg.Lang)
 	list, u, ok := b.subs(ctx, chat)
 	cmd, arg, _ := strings.Cut(data, ":")
+	if cmd == "b" {
+		text, kb := b.shopList(ctx, w, w.buyTitle, "tn", notice, []Button{{Text: w.back, CallbackData: "m"}})
+		if b.d.Billing != nil && b.d.Billing.TrialOpen(ctx, chat) {
+			tariff, _ := b.d.Billing.TrialTariff(ctx)
+			text = strings.ReplaceAll(text, html.EscapeString(w.payUnavailable), "")
+			kb.InlineKeyboard = append([][]Button{{{Text: "🎁 Пробный · " + tariff.Name + " · бесплатно", CallbackData: "tr"}}}, kb.InlineKeyboard...)
+			text += fmt.Sprintf("\n\n🎁 Пробный: %s · %d дн. · один раз на аккаунт", html.EscapeString(tariff.Name), tariff.DurationDays)
+		}
+		return text, kb
+	}
 	// Buying a new subscription works with or without one.
 	if b.canBuyNew(ctx) {
-		home := []Button{{Text: w.back, CallbackData: "m"}}
 		switch cmd {
-		case "b":
-			return b.shopList(ctx, w, w.buyTitle, "tn", notice, home)
 		case "tn":
 			return b.shopTariff(ctx, w, arg, "tn", "pn", shopBack(w, "tn", arg, "b"))
 		case "pn":
 			id, _, _ := strings.Cut(arg, ":")
 			return b.shopInvoice(ctx, w, chat, 0, arg, []Button{{Text: w.back, CallbackData: "tn:" + id}})
 		}
-	}
-	if cmd == "b" {
-		return "Покупка подписок сейчас недоступна.", &Keyboard{[][]Button{{{Text: w.back, CallbackData: "m"}}}}
 	}
 	if cmd == "tr" {
 		return b.takeTrial(ctx, w, chat)
@@ -382,7 +386,7 @@ func (b *Bot) vars(ctx context.Context, w *words, u db.User, now time.Time) map[
 	}
 	extra := grants.Main(u.ID)
 	state := domain.State(u, extra, now)
-	v := map[string]string{"name": u.Name, "brand": b.brand(ctx), "until": w.forever, "days": "—", "term": w.forever, "reset": ""}
+	v := map[string]string{"subscription_url": b.subURL(ctx, u), "name": u.Name, "brand": b.brand(ctx), "until": w.forever, "days": "—", "term": w.forever, "reset": ""}
 	switch state {
 	case domain.StateActive:
 		v["state"] = w.stateActive

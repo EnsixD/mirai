@@ -36,7 +36,10 @@ function useTelegram() {
 function usePatchTelegram() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: Schemas["PatchTelegramInputBody"]) => unwrap(api.PATCH("/api/v1/telegram", { body })),
+    mutationFn: (body: Schemas["PatchTelegramInputBody"]) => {
+      if(body.config) body={...body,config:{...body.config,admin:{...body.config.admin,buttons:body.config.admin.buttons.map(({id,action,label,on,row})=>({id,action,label,on,row}))}}};
+      return unwrap(api.PATCH("/api/v1/telegram",{body}));
+    },
     onSuccess: (v) => qc.setQueryData(qk.telegram, v),
   });
 }
@@ -730,7 +733,7 @@ function TextsCard({ draft, setDraft, defaults }: { draft: Config; setDraft: (c:
           <textarea id={`tg-${key}`} className="input" rows={key === "main" || key === "welcome" ? 5 : 2} maxLength={3000} value={draft.texts[key]} placeholder={defaults[key]} onChange={(e) => setDraft({ ...draft, texts: { ...draft.texts, [key]: e.target.value } })} />
         </Field>
       ))}
-      <p className="text-xs text-[var(--ink-500)]">{t("telegram.variables")}</p>
+      <p className="text-xs text-[var(--ink-500)]">{t("telegram.variables")} · {"{subscription_url}"} — ссылка подписки</p>
     </section>
   );
 }

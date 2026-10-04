@@ -370,5 +370,5 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *Key
 	if t, err := b.d.Store.Q.GetTariff(ctx, u.TariffID.Int64); err == nil {
 		what = billing.Describe(t, t.DurationDays, b.lang(ctx))
 	}
-	return fmt.Sprintf(html.EscapeString(w.trialDone), html.EscapeString(what)), &Keyboard{[][]Button{{{Text: w.trialOpen, CallbackData: "m"}}}}
+	return fmt.Sprintf(html.EscapeString(w.trialDone), html.EscapeString(what)), &Keyboard{[][]Button{{{Text: w.trialOpen, CallbackData: "u:" + strconv.FormatInt(u.ID, 10)}}}}
 }

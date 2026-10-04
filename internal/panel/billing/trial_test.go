@@ -59,8 +59,8 @@ func TestTrialOncePerAccount(t *testing.T) {
 	}
 }
 
-// Customers do not get a trial: an account with a subscription or a paid payment.
-func TestTrialIsForNewPeople(t *testing.T) {
+// Any account can claim once, including existing subscribers and paying customers.
+func TestTrialAlsoAvailableToExistingAccounts(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	e.offerTrial()
@@ -70,18 +70,18 @@ func TestTrialIsForNewPeople(t *testing.T) {
 	must(t, err)
 	_, err = e.st.DB.ExecContext(ctx, "UPDATE payments SET status = 'applied' WHERE tg_id = 902")
 	must(t, err)
-	if _, err := e.s.Trial(ctx, 902); !errors.Is(err, ErrTrialUsed) || e.s.TrialOpen(ctx, 902) {
+	if _, err := e.s.Trial(ctx, 902); err != nil || e.s.TrialOpen(ctx, 902) {
 		t.Fatalf("a customer who paid: %v", err)
 	}
 	// An account with a subscription linked by the admin.
 	u, err := e.s.d.Users.Create(ctx, domain.CreateInput{Name: "linked", TariffID: e.sale.ID})
 	must(t, err)
 	must(t, e.st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 903, CreatedAt: e.now.Unix()}))
-	if _, err := e.s.Trial(ctx, 903); !errors.Is(err, ErrTrialUsed) {
+	if _, err := e.s.Trial(ctx, 903); err != nil {
 		t.Fatalf("an account with a subscription: %v", err)
 	}
-	if n, _ := e.st.Q.CountTrials(ctx); n != 0 {
-		t.Fatalf("refused trials counted: %d", n)
+	if n, _ := e.st.Q.CountTrials(ctx); n != 2 {
+		t.Fatalf("trials counted: %d", n)
 	}
 }
 

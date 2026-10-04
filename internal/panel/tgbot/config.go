@@ -369,6 +369,8 @@ func (c *Config) Validate() error {
 			return ErrText
 		}
 	}
+	c.Texts.Expiring = strings.ReplaceAll(strings.ReplaceAll(c.Texts.Expiring, "«{name}»", "{subscription_url}"), "{name}", "{subscription_url}")
+	c.Texts.Expired = strings.ReplaceAll(strings.ReplaceAll(c.Texts.Expired, "«{name}»", "{subscription_url}"), "{name}", "{subscription_url}")
 	defaults := DefaultTexts(c.Lang)
 	fields := []struct {
 		value    *string

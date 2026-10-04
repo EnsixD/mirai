@@ -45,11 +45,7 @@ func (s *Service) trialAllowed(ctx context.Context, q *db.Queries, tgID int64) (
 	if taken, err := q.HasTrial(ctx, tgID); err != nil || taken {
 		return false, err
 	}
-	if n, err := q.CountTgLinksOf(ctx, tgID); err != nil || n > 0 {
-		return false, err
-	}
-	n, err := q.CountUserPaidPayments(ctx, tgID)
-	return n == 0, err
+	return true, nil
 }
 
 // Trial gives tgID the free trial: a subscription on the trial tariff, linked to the

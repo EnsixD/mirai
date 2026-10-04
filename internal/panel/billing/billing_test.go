@@ -97,6 +97,13 @@ func newEnv(t *testing.T) *env {
 	e.s.SetTelegram(e.tg)
 	must(t, settings.Set(ctx, set, KeyConfig, Config{Enabled: true, Stars: true, AllowNew: true, RenewResetsTraffic: true}))
 	ts, _ := e.st.Q.ListTariffs(ctx)
+	if len(ts) == 0 {
+		_, err := e.st.Q.CreateTariff(ctx, db.CreateTariffParams{Name: "Trial fixture", DurationDays: 3, TrafficLimit: sql.NullInt64{Int64: 5 << 30, Valid: true}, DeviceLimit: sql.NullInt64{Int64: 1, Valid: true}, ResetStrategy: "none", CreatedAt: e.now.Unix()})
+		must(t, err)
+		_, err = e.st.Q.CreateTariff(ctx, db.CreateTariffParams{Name: "Standard fixture", DurationDays: 30, TrafficLimit: sql.NullInt64{Int64: 150 << 30, Valid: true}, DeviceLimit: sql.NullInt64{Int64: 3, Valid: true}, ResetStrategy: "none", CreatedAt: e.now.Unix()})
+		must(t, err)
+		ts, _ = e.st.Q.ListTariffs(ctx)
+	}
 	std := ts[1]
 	e.sale, err = e.st.Q.UpdateTariff(ctx, db.UpdateTariffParams{Name: std.Name, TrafficLimit: std.TrafficLimit, DurationDays: 30, DeviceLimit: std.DeviceLimit,
 		ResetStrategy: std.ResetStrategy, Sort: std.Sort, PriceStars: sql.NullInt64{Int64: 150, Valid: true}, PriceRub: sql.NullInt64{Int64: 19900, Valid: true}, OnSale: 1, ID: std.ID})
