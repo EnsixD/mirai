@@ -59,7 +59,16 @@ func (s *SPA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveFile(w, r, name)
 		return
 	}
-	head := `<base href="` + html.EscapeString("/"+*s.prefix.Load()+"/") + `">`
+	prefix := *s.prefix.Load()
+	if override, ok := r.Context().Value(pagePrefixKey{}).(string); ok {
+		prefix = override
+	}
+	head := `<base href="` + html.EscapeString(func() string {
+		if prefix == "" {
+			return "/"
+		}
+		return "/" + prefix + "/"
+	}()) + `">`
 	if l := *s.lang.Load(); l != "" {
 		head += `<meta name="mirai-lang" content="` + html.EscapeString(l) + `">`
 	}

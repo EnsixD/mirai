@@ -1,6 +1,7 @@
 package app
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -160,5 +161,20 @@ func TestSubPortOverHTTP(t *testing.T) {
 	resp, body = h.do(http.MethodPatch, api+"/settings", map[string]any{"sub_port": 0}, csrf)
 	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &v) != nil || v.SubPort != 0 || !strings.HasPrefix(v.SubBaseURL, "https://203.0.113.10:21355/") {
 		t.Fatalf("sub port off: %d %s", resp.StatusCode, body)
+	}
+}
+
+func TestSubscriptionHTTPWithoutCertificate(t *testing.T) {
+	sp := NewSubPort("127.0.0.1", &tls.Config{MinVersion: tls.VersionTLS12}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sp.SetHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	sp.SetHTTP(true)
+	t.Cleanup(sp.Close)
+	port := freePort(t)
+	if err := sp.Set(port); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := get(port, "/A7b2X9mQ4")
+	if err != nil || code != 200 {
+		t.Fatalf("HTTP without cert: %d %v", code, err)
 	}
 }

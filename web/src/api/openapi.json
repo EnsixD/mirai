@@ -2598,6 +2598,12 @@
             "maxLength": 8192,
             "type": "string"
           },
+          "sub_id_length": {
+            "format": "int64",
+            "maximum": 32,
+            "minimum": 9,
+            "type": "integer"
+          },
           "sub_incy_rules": {
             "maxLength": 8192,
             "type": "string"
@@ -2608,6 +2614,10 @@
             "maximum": 65535,
             "minimum": 0,
             "type": "integer"
+          },
+          "sub_public_url": {
+            "maxLength": 500,
+            "type": "string"
           },
           "sub_routing": {
             "enum": [
@@ -3756,6 +3766,10 @@
           "sub_happ_rules": {
             "type": "string"
           },
+          "sub_id_length": {
+            "format": "int64",
+            "type": "integer"
+          },
           "sub_incy_rules": {
             "type": "string"
           },
@@ -3766,6 +3780,9 @@
           },
           "sub_port_error": {
             "description": "sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели",
+            "type": "string"
+          },
+          "sub_public_url": {
             "type": "string"
           },
           "sub_routing": {
@@ -3785,6 +3802,8 @@
           }
         },
         "required": [
+          "sub_public_url",
+          "sub_id_length",
           "sub_happ_rules",
           "sub_incy_rules",
           "brand",

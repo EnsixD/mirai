@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -144,7 +145,11 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	}
 	subPort := NewSubPort(listenHost, panelTLS, logger)
 	defer subPort.Close()
-	opts.SubPort, opts.SubPortError = subPort.Set, subPort.Error
+	opts.SubPort = func(port int) error {
+		subPort.SetHTTP(strings.HasPrefix(settings.New(st.Q).SubscriptionURL(ctx), "http://"))
+		return subPort.Set(port)
+	}
+	opts.SubPortError = subPort.Error
 	var certs *acme.Manager
 	if !cfg.Dev {
 		certs = acme.New(cfg.DataDir, holder, self, settings.New(st.Q), logger, time.Now)
@@ -164,6 +169,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	}
 	subPort.SetHandler(p.SubOnly())
 	if port, _, err := settings.Get[int](ctx, settings.New(st.Q), settings.KeySubPort); err == nil {
+		subPort.SetHTTP(strings.HasPrefix(settings.New(st.Q).SubscriptionURL(ctx), "http://"))
 		subPort.Start(port)
 	}
 	// The workers (node sync, billing, the bot, certificates) use the database: they are

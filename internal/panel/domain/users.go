@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mirai/internal/panel/secure"
+	"mirai/internal/panel/settings"
 	"mirai/internal/panel/store"
 	"mirai/internal/panel/store/db"
 )
@@ -149,7 +150,7 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 		TariffID: sql.NullInt64{Int64: t.ID, Valid: true}, TrafficLimit: t.TrafficLimit, DeviceLimit: t.DeviceLimit,
 		ResetStrategy: t.ResetStrategy, PeriodDays: 30, PeriodStart: now,
 		ExpiresAt:  tariffExpiry(time.Unix(now, 0), durationTariff{termDays(t, in.TermDays), t.BillingDay}),
-		BillingDay: t.BillingDay, SubToken: secure.Token(24), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
+		BillingDay: t.BillingDay, SubToken: subscriptionToken(ctx, q), SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		return u, err
@@ -515,7 +516,7 @@ func (s *Users) reissue(ctx context.Context, id int64) error {
 		if err := q.DeleteLegacySubTokensOf(ctx, id); err != nil {
 			return err
 		}
-		return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: secure.Token(24), UpdatedAt: now, ID: id})
+		return q.SetUserCredentials(ctx, db.SetUserCredentialsParams{SlotID: sql.NullInt64{Int64: slot.ID, Valid: true}, SubToken: subscriptionToken(ctx, q), UpdatedAt: now, ID: id})
 	})
 }
 
@@ -654,4 +655,12 @@ func DecodeInbounds(raw sql.NullString) []int64 {
 	var ids []int64
 	_ = json.Unmarshal([]byte(raw.String), &ids)
 	return ids
+}
+
+func subscriptionToken(ctx context.Context, q *db.Queries) string {
+	length, _, err := settings.Get[int](ctx, settings.New(q), settings.KeySubIDLength)
+	if err != nil || length < 9 || length > 32 {
+		length = 24
+	}
+	return secure.Token(length)
 }

@@ -509,7 +509,7 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 	return nil
 }
 
-var subLink = regexp.MustCompile(`https?://\S+/([A-Za-z0-9]{24})(?:[/?#]\S*)?`)
+var subLink = regexp.MustCompile(`https?://\S+/([A-Za-z0-9]{9,32})(?:[/?#]\S*)?`)
 
 // onMessage: /start (with a code from a subscription page), a subscription link, or
 // anything else — every message brings the main menu back to the bottom of the chat.

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -14,11 +16,12 @@ import (
 // path, or nothing. Everything else gets the same bare 404, so a scanner cannot tell
 // a panel from any other HTTPS endpoint.
 type Server struct {
-	paths  atomic.Pointer[settings.Paths]
-	admin  http.Handler
-	sub    http.Handler
-	legacy http.Handler // the old panel's links (settings.Paths.Legacy); nil: none
-	hsts   atomic.Pointer[func() bool]
+	paths     atomic.Pointer[settings.Paths]
+	admin     http.Handler
+	sub       http.Handler
+	publicSub func(*http.Request) string
+	legacy    http.Handler // the old panel's links (settings.Paths.Legacy); nil: none
+	hsts      atomic.Pointer[func() bool]
 }
 
 // SetLegacy takes the handler of the old panel's subscription links.
@@ -29,6 +32,8 @@ func New(admin, sub http.Handler) *Server {
 	s.paths.Store(&settings.Paths{})
 	return s
 }
+
+func (s *Server) SetSubscriptionURL(get func(*http.Request) string) { s.publicSub = get }
 
 func (s *Server) SetPaths(p settings.Paths) { s.paths.Store(&p) }
 
@@ -78,6 +83,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 		r2.URL.RawPath = ""
 		s.legacy.ServeHTTP(w, r2)
 	default:
+		if s.publicSub != nil {
+			if u, err := url.Parse(s.publicSub(r)); err == nil && u.Host != "" && strings.EqualFold(strings.Split(r.Host, ":")[0], u.Hostname()) {
+				prefix := strings.TrimRight(u.Path, "/")
+				if strings.HasPrefix(p, prefix+"/") {
+					r2 := r.Clone(context.WithValue(r.Context(), pagePrefixKey{}, strings.Trim(prefix, "/")))
+					r2.URL.Path = strings.TrimPrefix(p, prefix)
+					r2.URL.RawPath = ""
+					s.sub.ServeHTTP(w, r2)
+					return
+				}
+			}
+		}
 		NotFound(w)
 	}
 }
@@ -88,7 +105,7 @@ func (s *Server) forward(w http.ResponseWriter, r *http.Request, h http.Handler,
 		http.Redirect(w, r, "/"+seg+"/", http.StatusFound)
 		return
 	}
-	r2 := r.Clone(r.Context())
+	r2 := r.Clone(context.WithValue(r.Context(), pagePrefixKey{}, seg))
 	r2.URL.Path = "/" + rest
 	r2.URL.RawPath = ""
 	h.ServeHTTP(w, r2)
@@ -115,3 +132,5 @@ func NotFound(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write([]byte("404 Not Found\n"))
 }
+
+type pagePrefixKey struct{}

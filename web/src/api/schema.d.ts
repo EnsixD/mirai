@@ -2177,12 +2177,15 @@ export interface components {
             sub_group_auto?: string;
             sub_group_main?: string;
             sub_happ_rules?: string;
+            /** Format: int64 */
+            sub_id_length?: number;
             sub_incy_rules?: string;
             /**
              * Format: int64
              * @description Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать
              */
             sub_port?: number;
+            sub_public_url?: string;
             /** @enum {string} */
             sub_routing?: "ru_direct" | "all";
             /** @description Свои правила Clash, до 500 строк; ошибка указывает номер строки */
@@ -2604,6 +2607,8 @@ export interface components {
             /** @description Главная группа в Clash-приложениях */
             sub_group_main: string;
             sub_happ_rules: string;
+            /** Format: int64 */
+            sub_id_length: number;
             sub_incy_rules: string;
             /**
              * Format: int64
@@ -2612,6 +2617,7 @@ export interface components {
             sub_port: number;
             /** @description sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели */
             sub_port_error?: string;
+            sub_public_url: string;
             /**
              * @description Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN
              * @enum {string}

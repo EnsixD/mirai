@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,6 +172,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	deps.NodeCerts = o.NodeCerts
 	deps.ForgetNode = forgetNodeFiles(o)
 	subBase := func(ctx context.Context) string {
+		if custom := set.SubscriptionURL(ctx); custom != "" {
+			return custom
+		}
 		ep, err := set.SubEndpoint(ctx)
 		if err != nil || ep.Host == "" {
 			return ""
@@ -343,6 +348,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	adminMux.Handle("/api/", apiHandler)
 	adminMux.Handle("/", p.spa)
 	p.server = server.New(adminMux, subHandler)
+	p.server.SetSubscriptionURL(func(r *http.Request) string { return set.SubscriptionURL(r.Context()) })
 	p.server.SetLegacy(subHandler.Legacy())
 	p.server.SetHSTS(o.HSTS)
 	p.Handler = p.server
@@ -366,7 +372,13 @@ func (p *Panel) Apply(ctx context.Context) (settings.Paths, error) {
 	p.spa.SetPrefix(paths.Admin)
 	p.spa.SetLang(lang)
 	if p.subPage != nil {
-		p.subPage.SetPrefix(paths.Sub)
+		prefix := paths.Sub
+		if custom := p.Settings.SubscriptionURL(ctx); custom != "" {
+			if u, err := url.Parse(custom); err == nil {
+				prefix = strings.Trim(u.Path, "/")
+			}
+		}
+		p.subPage.SetPrefix(prefix)
 		p.subPage.SetLang(lang)
 	}
 	return paths, nil

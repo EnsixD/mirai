@@ -22,6 +22,8 @@ import (
 )
 
 type SettingsView struct {
+	SubPublicURL string   `json:"sub_public_url"`
+	SubIDLength  int      `json:"sub_id_length"`
 	HappRules    string   `json:"sub_happ_rules"`
 	INCYRules    string   `json:"sub_incy_rules"`
 	Brand        string   `json:"brand"`
@@ -58,6 +60,8 @@ type settingsOutput struct{ Body SettingsView }
 
 type patchSettingsInput struct {
 	Body struct {
+		SubPublicURL  *string `json:"sub_public_url,omitempty" maxLength:"500"`
+		SubIDLength   *int    `json:"sub_id_length,omitempty" minimum:"9" maximum:"32"`
 		HappRules     *string `json:"sub_happ_rules,omitempty" maxLength:"8192"`
 		INCYRules     *string `json:"sub_incy_rules,omitempty" maxLength:"8192"`
 		Brand         *string `json:"brand,omitempty" maxLength:"40"`
@@ -128,6 +132,11 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	get(settings.KeyRules, &v.SubRules)
 	get(settings.KeyHappRules, &v.HappRules)
 	get(settings.KeyINCYRules, &v.INCYRules)
+	v.SubPublicURL = h.d.Settings.SubscriptionURL(ctx)
+	v.SubIDLength, _, _ = settings.Get[int](ctx, h.d.Settings, settings.KeySubIDLength)
+	if v.SubIDLength < 9 {
+		v.SubIDLength = 24
+	}
 	v.SubRouting = string(subs.ParseRouting(v.SubRouting))
 	get(settings.KeyFingerprint, &v.Fingerprint)
 	if !proto.ValidFingerprint(v.Fingerprint) {
@@ -196,6 +205,9 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if h.d.Cert != nil {
 		v.Certificate = h.d.Cert()
 	}
+	if v.SubPublicURL != "" {
+		v.SubBaseURL = v.SubPublicURL + "/"
+	}
 	return v, nil
 }
 
@@ -209,6 +221,11 @@ func (h *handlers) getSettings(ctx context.Context, _ *struct{}) (*settingsOutpu
 
 func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (*settingsOutput, error) {
 	b := in.Body
+	if b.SubPublicURL != nil {
+		if err := settings.ValidateSubscriptionURL(strings.TrimSpace(*b.SubPublicURL)); err != nil {
+			return nil, huma.Error422UnprocessableEntity("invalid_subscription_url")
+		}
+	}
 	for field, value := range map[string]*string{"sub_happ_rules": b.HappRules, "sub_incy_rules": b.INCYRules} {
 		if value != nil {
 			app := "happ"
@@ -222,7 +239,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	// Where clients are sent, and what they are told to trust: a leaked API key must not
 	// move subscriptions to another server or add rules to every client.
-	for field, touched := range map[string]bool{"public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
+	for field, touched := range map[string]bool{"sub_public_url": b.SubPublicURL != nil, "sub_id_length": b.SubIDLength != nil, "public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
 		"sub_happ_rules": b.HappRules != nil, "sub_incy_rules": b.INCYRules != nil, "sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil,
 		// What every subscriber's app shows: text, links and the logo it downloads.
 		"sub_announce": b.Announce != nil, "sub_announce_url": b.AnnounceURL != nil, "app_branding": b.AppBranding != nil,
@@ -348,6 +365,11 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	// read from nothing: READ COMMITTED.
 	err := h.d.Store.TxRC(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
+		if b.SubIDLength != nil {
+			if err := settings.Set(ctx, set, settings.KeySubIDLength, *b.SubIDLength); err != nil {
+				return err
+			}
+		}
 		if b.SubPort != nil {
 			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {
 				return err
@@ -358,7 +380,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 				return err
 			}
 		}
-		for key, v := range map[string]*string{settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
+		for key, v := range map[string]*string{settings.KeySubPublicURL: b.SubPublicURL, settings.KeyBrand: b.Brand, settings.KeySupportURL: b.SupportURL, settings.KeyPublicHost: b.PublicHost, settings.KeyDomain: b.Domain,
 			settings.KeyAnnounce: b.Announce, settings.KeyAnnounceURL: b.AnnounceURL, settings.KeyBrandAccent: b.BrandAccent, settings.KeyBrandLogo: b.BrandLogoURL,
 			settings.KeyHappRules: b.HappRules, settings.KeyINCYRules: b.INCYRules, settings.KeyGroupMain: b.SubGroupMain, settings.KeyGroupAuto: b.SubGroupAuto, settings.KeyRouting: b.SubRouting, settings.KeyFingerprint: b.Fingerprint, settings.KeyDefaultLang: b.DefaultLang} {
 			if v == nil {
@@ -390,6 +412,12 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			}
 		}
 		return nil, err
+	}
+	if b.SubPublicURL != nil && h.d.SubPort != nil {
+		port, _, _ := settings.Get[int](ctx, h.d.Settings, settings.KeySubPort)
+		if err := h.d.SubPort(port); err != nil {
+			h.d.Log.Warn("subscription protocol", "err", err)
+		}
 	}
 	// The bot's Mini App button points at the subscription page.
 	if b.SubPort != nil && h.d.Telegram != nil {
