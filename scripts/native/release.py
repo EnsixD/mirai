@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
     'notes': {
-        'ru': 'Mirai: трафик устройств, публичный сайт для REALITY, удаление устаревших протоколов и платежей. Защита UDP и настройка XHTTP.',
-        'en': 'Device traffic, a public REALITY cover website, retired protocol and payment cleanup, UDP safety and synchronized XHTTP settings.',
+        'ru': 'Исправление нативных обновлений: проверка здоровья принимает публичную страницу сайта. Откат PostgreSQL выполняется атомарно, включая новые таблицы; службы запускаются даже при ошибке восстановления.',
+        'en': 'Native update recovery: health checks accept the public cover website. PostgreSQL rollback is atomic and handles newly migrated tables; services restart even if recovery fails.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

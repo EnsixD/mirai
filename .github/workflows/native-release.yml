@@ -46,6 +46,11 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+      - name: Install PostgreSQL 18 tools for recovery tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          echo '/usr/lib/postgresql/18/bin' >> "$GITHUB_PATH"
       - name: Compile all packages and verify current Mirai contracts
         run: |
           go test ./... -run '^$'
