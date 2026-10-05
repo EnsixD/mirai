@@ -277,7 +277,7 @@ html[data-theme="midnight"] .btn-primary:hover:not(:disabled) { background: var(
   .state-mark.err { border-style: solid; border-color: var(--berry-600); color: var(--berry-600); }
 
   /* drawer */
-  .scrim { position: fixed; inset: 0; background: rgba(22, 26, 36, 0.23); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 40; }
+  .scrim { position: fixed; inset: 0; background: rgba(22, 26, 36, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 40; }
   .drawer { position: fixed; top: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: min(480px, calc(100vw - 32px)); border-radius: var(--r-xl); z-index: 50; display: flex; flex-direction: column; overflow: hidden; }
   .creation-modal { position: fixed; left: 50%; top: 50%; width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); border-radius: var(--r-xl); z-index: 50; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-lg); }
   .creation-modal .dr-head, .creation-modal .dr-foot { flex-shrink: 0; padding-left: 28px; padding-right: 28px; }
