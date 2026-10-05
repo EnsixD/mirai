@@ -149,7 +149,17 @@ func (s *Inbounds) Create(ctx context.Context, in NewInbound) (db.Inbound, error
 	}
 	config := in.Config
 	if info.ID != presets.Custom {
-		if config, err = presets.NewConfig(info.ID, in.Dest); err != nil {
+		dest := in.Dest
+		if dest == "" && node.Address == "" {
+			domain, e := settings.New(s.st.Q).String(ctx, settings.KeyDomain)
+			if e != nil {
+				return db.Inbound{}, e
+			}
+			if domain != "" {
+				dest = net.JoinHostPort(domain, "443")
+			}
+		}
+		if config, err = presets.NewConfig(info.ID, dest); err != nil {
 			return db.Inbound{}, err
 		}
 	}

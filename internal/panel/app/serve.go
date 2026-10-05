@@ -28,6 +28,7 @@ import (
 	"mirai/internal/panel/dnscheck"
 	"mirai/internal/panel/domain"
 	"mirai/internal/panel/nodesync"
+	"mirai/internal/panel/server"
 	"mirai/internal/panel/settings"
 	"mirai/internal/panel/store"
 	"mirai/internal/panel/store/db"
@@ -173,6 +174,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	if err != nil {
 		return err
 	}
+	p.server.SetCamouflage(server.Camouflage(os.Getenv("MIRAI_CAMOUFLAGE_DIR")))
 	paths, err := p.Apply(ctx)
 	if err != nil {
 		return err

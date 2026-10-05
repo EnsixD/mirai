@@ -13,15 +13,15 @@ import (
 )
 
 // Server routes by the first path segment: the secret admin path, the subscription
-// path, or nothing. Everything else gets the same bare 404, so a scanner cannot tell
-// a panel from any other HTTPS endpoint.
+// path, or the public website. Secret paths never appear on the public website.
 type Server struct {
-	paths     atomic.Pointer[settings.Paths]
-	admin     http.Handler
-	sub       http.Handler
-	publicSub func(*http.Request) string
-	legacy    http.Handler // the old panel's links (settings.Paths.Legacy); nil: none
-	hsts      atomic.Pointer[func() bool]
+	paths      atomic.Pointer[settings.Paths]
+	admin      http.Handler
+	sub        http.Handler
+	publicSub  func(*http.Request) string
+	camouflage http.Handler
+	legacy     http.Handler // the old panel's links (settings.Paths.Legacy); nil: none
+	hsts       atomic.Pointer[func() bool]
 }
 
 // SetLegacy takes the handler of the old panel's subscription links.
@@ -34,6 +34,7 @@ func New(admin, sub http.Handler) *Server {
 }
 
 func (s *Server) SetSubscriptionURL(get func(*http.Request) string) { s.publicSub = get }
+func (s *Server) SetCamouflage(h http.Handler)                      { s.camouflage = h }
 
 func (s *Server) SetPaths(p settings.Paths) { s.paths.Store(&p) }
 
@@ -83,6 +84,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 		r2.URL.RawPath = ""
 		s.legacy.ServeHTTP(w, r2)
 	default:
+		if s.camouflage != nil && (p == "/" || p == "/robots.txt" || p == "/favicon.ico") {
+			s.camouflage.ServeHTTP(w, r)
+			return
+		}
 		if s.publicSub != nil {
 			if u, err := url.Parse(s.publicSub(r)); err == nil && u.Host != "" && strings.EqualFold(strings.Split(r.Host, ":")[0], u.Hostname()) {
 				prefix := strings.TrimRight(u.Path, "/")
@@ -90,12 +95,25 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 					r2 := r.Clone(context.WithValue(r.Context(), pagePrefixKey{}, strings.Trim(prefix, "/")))
 					r2.URL.Path = strings.TrimPrefix(p, prefix)
 					r2.URL.RawPath = ""
-					s.sub.ServeHTTP(w, r2)
+					if s.camouflage == nil {
+						s.sub.ServeHTTP(w, r2)
+					} else {
+						response := &subscriptionResponse{ResponseWriter: w}
+						s.sub.ServeHTTP(response, r2)
+						if response.missing {
+							w.Header().Del("Content-Length")
+							s.camouflage.ServeHTTP(w, r)
+						}
+					}
 					return
 				}
 			}
 		}
-		NotFound(w)
+		if s.camouflage != nil {
+			s.camouflage.ServeHTTP(w, r)
+		} else {
+			NotFound(w)
+		}
 	}
 }
 
@@ -134,3 +152,22 @@ func NotFound(w http.ResponseWriter) {
 }
 
 type pagePrefixKey struct{}
+
+// Keep subscription responses streaming; only discard an unknown subscription's 404.
+type subscriptionResponse struct {
+	http.ResponseWriter
+	missing bool
+}
+
+func (w *subscriptionResponse) WriteHeader(status int) {
+	w.missing = status == http.StatusNotFound
+	if !w.missing {
+		w.ResponseWriter.WriteHeader(status)
+	}
+}
+func (w *subscriptionResponse) Write(body []byte) (int, error) {
+	if w.missing {
+		return len(body), nil
+	}
+	return w.ResponseWriter.Write(body)
+}
