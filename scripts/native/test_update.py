@@ -15,6 +15,16 @@ spec.loader.exec_module(update)
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_latest_fetch_bypasses_cached_redirect(self):
+        url = 'https://github.com/EnsixD/mirai/releases/latest/download/manifest.json'
+        with patch.object(update.urllib.request, 'urlopen') as open_url, patch.object(update.time, 'time_ns', side_effect=[101, 102]):
+            update.fetch(url)
+            update.fetch(url + '.sig')
+        requests = [call.args[0] for call in open_url.call_args_list]
+        self.assertEqual(requests[0].full_url, url + '?mirai_check=101')
+        self.assertEqual(requests[1].full_url, url + '.sig?mirai_check=102')
+        self.assertEqual(requests[0].get_header('Cache-control'), 'no-cache')
+
     def test_restore_failure_still_restarts_services(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'root'

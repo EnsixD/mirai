@@ -33,7 +33,9 @@ def run(*args, **kwargs):
 def fetch(url):
     if not url.startswith('https://github.com/EnsixD/mirai/releases/'):
         raise ValueError('Release asset is outside the Mirai repository')
-    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mirai-native'}), timeout=90) as response:
+    if '/releases/latest/' in url:
+        url += ('&' if '?' in url else '?') + 'mirai_check=' + str(time.time_ns())
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mirai-native', 'Cache-Control': 'no-cache'}), timeout=90) as response:
         return response.read(180 * 1024 * 1024)
 
 def restore_database(dump, environment):

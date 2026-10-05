@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
     'notes': {
-        'ru': 'Профиль пользователя и выдача подписки в админ-боте, расширенные тексты и ссылки подключения. Модальное окно и удаление подписки с сохранением Telegram-профиля. Исправлены счётчики посетителей и зарегистрированных устройств, пояснения адреса и порта подписки.',
-        'en': 'Customer profiles and contextual subscription grants in the admin bot, richer messages and visible connection links. Subscription modal and deletion preserving the Telegram profile. Correct visitor and registered-device counts, clarified subscription address and port settings.',
+        'ru': 'Ручная проверка и нативное обновление обходят устаревший кэш GitHub. Настройка инбаунда открывается в модальном окне. Установщик открывает порты пресетов при уже включённом UFW. Включены исправления счётчиков устройств, подписок и Telegram из 0.5.0.6.',
+        'en': 'Manual release checks and native updates bypass stale GitHub caches. Inbound settings open in a modal. The installer permits preset ports when UFW is already enabled. Includes the device counts, subscription and Telegram improvements from 0.5.0.6.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

@@ -281,6 +281,9 @@ func TestFetchAsksAgainOnAMismatchedPair(t *testing.T) {
 	oldData, newData := manifest("0.3.9"), manifest("0.3.10")
 	var manifestGets int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cache-Control") != "no-cache" {
+			t.Error("update check must bypass cached release responses")
+		}
 		switch r.URL.Path {
 		case "/manifest.json":
 			manifestGets++

@@ -22,8 +22,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,10 +78,19 @@ func Fetch(indexURL, latestURL string) Source {
 
 func fetch(indexURL, latestURL string, pub ed25519.PublicKey, client *http.Client) Source {
 	get := func(ctx context.Context, u string, limit int64) ([]byte, error) {
+		// GitHub can cache the latest-release redirect after a new release is published.
+		// Keep immutable asset URLs stable, but always refresh mutable latest/index URLs.
+		if parsed, err := url.Parse(u); err == nil && (parsed.Host == "raw.githubusercontent.com" || (parsed.Host == "github.com" && strings.Contains(parsed.Path, "/releases/latest/"))) {
+			query := parsed.Query()
+			query.Set("mirai_check", fmt.Sprint(time.Now().UnixNano()))
+			parsed.RawQuery = query.Encode()
+			u = parsed.String()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
 		}
+		req.Header.Set("Cache-Control", "no-cache")
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
