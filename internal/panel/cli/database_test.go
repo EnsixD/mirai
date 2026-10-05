@@ -187,7 +187,10 @@ func TestToolOutputMasksThePassword(t *testing.T) {
 
 // A panel that answers on its port is unhealthy when its database does not.
 func TestHealthChecksTheDatabase(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
+	status := http.StatusNotFound
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+	}))
 	defer srv.Close()
 	t.Setenv("MIRAI_DEV", "1")
 	t.Setenv("MIRAI_PANEL_LISTEN", strings.TrimPrefix(srv.URL, "http://"))
@@ -195,6 +198,15 @@ func TestHealthChecksTheDatabase(t *testing.T) {
 	if err := health(); err != nil {
 		t.Fatal(err)
 	}
+	status = http.StatusOK // The public camouflage website introduced in 0.5.0.3.
+	if err := health(); err != nil {
+		t.Fatal("camouflage page rejected:", err)
+	}
+	status = http.StatusServiceUnavailable
+	if err := health(); err == nil {
+		t.Fatal("unavailable panel accepted")
+	}
+	status = http.StatusOK
 	t.Setenv("MIRAI_DATABASE_URL", "postgresql://mirai:x@127.0.0.1:1/mirai?sslmode=disable")
 	if err := health(); err == nil || !strings.Contains(err.Error(), "database") {
 		t.Fatal("healthy without a database:", err)

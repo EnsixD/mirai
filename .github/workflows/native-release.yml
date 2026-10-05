@@ -58,6 +58,8 @@ jobs:
           go test ./internal/proto -run '^TestMiraiTransportSafety$'
           go test ./internal/panel/subs -run '^TestXHTTPUDPFailClosed$'
           go test ./internal/panel/autotune -run '^TestCutOff$'
+          go test ./internal/panel/cli -run '^TestHealthChecksTheDatabase$'
+          python3 scripts/native/test_update.py
       - name: Build Linux binaries
         env:
           CGO_ENABLED: '0'

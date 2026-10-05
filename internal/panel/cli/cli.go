@@ -328,7 +328,7 @@ func resetPassword(ctx context.Context, st *store.Store, args []string, stdin io
 	return nil
 }
 
-// health is the container healthcheck: the panel must answer "/" with its bare 404.
+// health accepts the camouflage page and the legacy bare 404 on the local listener.
 func health() error {
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -352,7 +352,7 @@ func health() error {
 		return err
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	// A panel that answers but has lost its database serves nothing but errors. One bare
