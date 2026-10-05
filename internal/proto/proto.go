@@ -208,6 +208,9 @@ func Validate(t Template, o Options) error {
 	if !ok {
 		return &Error{Code: "config_type", Field: "type", Detail: typ}
 	}
+	if typ != "vless" && typ != "vmess" && typ != "trojan" && typ != "hysteria2" {
+		return &Error{Code: "config_type", Field: "type", Detail: typ}
+	}
 	for k := range t {
 		switch {
 		case k == "type" || k == extKey:
@@ -242,16 +245,35 @@ func Validate(t Template, o Options) error {
 		}
 	}
 	if reality != nil {
+		if t["ws-path"] != nil {
+			return fail("config_reality_ws", "ws-path")
+		}
 		if err := validateReality(reality, o); err != nil {
 			return err
 		}
 	}
 	if ext.Flow != "" {
-		if typ != "vless" || ext.Flow != "xtls-rprx-vision" || transport(t) != "tcp" {
-			return fail("config_flow", extKey+".flow")
-		}
+		return fail("config_flow", extKey+".flow")
 	}
 	if x := t.section("xhttp-config"); x != nil {
+		for k, v := range x {
+			if k == "path" || k == "mode" || k == "host" {
+				if _, ok := v.(string); !ok {
+					return fail("config_key", "xhttp-config."+k)
+				}
+				continue
+			}
+			if _, ok := xhttpExtraKeys[k]; !ok {
+				return fail("config_key", "xhttp-config."+k)
+			}
+			if k == "x-padding-obfs-mode" || k == "no-grpc-header" {
+				if _, ok := v.(bool); !ok {
+					return fail("config_key", "xhttp-config."+k)
+				}
+			} else if _, ok := v.(string); !ok {
+				return fail("config_key", "xhttp-config."+k)
+			}
+		}
 		if mode, _ := x["mode"].(string); mode != "" && mode != "stream-one" && mode != "stream-up" && mode != "packet-up" {
 			// "auto" hangs with mihomo v1.19.31 on both ends (S-01a).
 			return fail("config_xhttp_mode", "xhttp-config.mode")
@@ -366,7 +388,7 @@ func validateObfs(t Template) error {
 			return fail("config_obfs", "obfs")
 		}
 		return nil
-	case obfs != ObfsSalamander && obfs != ObfsGecko, t.str("obfs-password") == "":
+	case obfs != ObfsSalamander, t.str("obfs-password") == "":
 		return fail("config_obfs", "obfs")
 	case obfs == ObfsSalamander && (minSet || maxSet):
 		return fail("config_obfs_sizes", "obfs-min-packet-size")
@@ -401,7 +423,7 @@ func Obfs(t Template) string {
 // two share it); password fills one in when the template has none. Gecko's packet sizes
 // go away with Gecko.
 func SetObfs(t Template, obfs, password string) error {
-	if t.Type() != "hysteria2" || (obfs != ObfsSalamander && obfs != ObfsGecko) {
+	if t.Type() != "hysteria2" || obfs != ObfsSalamander {
 		return fail("config_obfs", "obfs")
 	}
 	t["obfs"] = obfs

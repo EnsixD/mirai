@@ -42,13 +42,16 @@ type Evidence struct {
 
 // Verdict counts, for one inbound, the devices that try all of the node's inbounds.
 type Verdict struct {
-	Blocked int // did not reach it
-	Reached int // reached it
+	Blocked         int // did not reach it
+	Reached         int // reached it
+	BlockedNetworks int // independent /24 (IPv4) or /64 (IPv6) networks
 }
 
 // CutOff: devices that reach everything else do not reach this inbound. A few devices
 // failing next to many that get through are their own networks' problem.
-func (v Verdict) CutOff() bool { return v.Blocked > 0 && 4*v.Blocked >= v.Reached }
+func (v Verdict) CutOff() bool {
+	return v.Blocked >= 2 && v.BlockedNetworks >= 2 && 4*v.Blocked >= v.Reached
+}
 
 // Detect finds inbounds the node's devices cannot reach. Only devices that clearly try
 // every inbound count: a Clash profile's url-test group checks all proxies every few
@@ -62,6 +65,7 @@ func (v Verdict) CutOff() bool { return v.Blocked > 0 && 4*v.Blocked >= v.Reache
 // network gets through now: then the failure is the device's own (its app, its profile).
 func Detect(e Evidence) map[int64]Verdict {
 	out := map[int64]Verdict{}
+	blockedNetworks := map[int64]map[string]bool{}
 	k := min(3, len(e.Inbounds)-1)
 	if k < 2 {
 		return out
@@ -117,6 +121,11 @@ func Detect(e Evidence) map[int64]Verdict {
 				v.Reached++
 			case e.Reach[c.Slot][x.ID] > 0 && !reachedFrom[x.Name][netOf(c.IP)]:
 				v.Blocked++
+				if blockedNetworks[x.ID] == nil {
+					blockedNetworks[x.ID] = map[string]bool{}
+				}
+				blockedNetworks[x.ID][netOf(c.IP)] = true
+				v.BlockedNetworks = len(blockedNetworks[x.ID])
 			default:
 				continue
 			}

@@ -177,10 +177,11 @@ func TestCutOff(t *testing.T) {
 		v    Verdict
 		want bool
 	}{
-		{Verdict{Blocked: 1}, true},
-		{Verdict{Blocked: 1, Reached: 4}, true},
+		{Verdict{Blocked: 1}, false},
+		{Verdict{Blocked: 1, Reached: 4}, false},
 		{Verdict{Blocked: 1, Reached: 5}, false}, // one device's own network, next to many that get through
-		{Verdict{Blocked: 2, Reached: 5}, true},
+		{Verdict{Blocked: 2, BlockedNetworks: 1, Reached: 5}, false},
+		{Verdict{Blocked: 2, BlockedNetworks: 2, Reached: 5}, true},
 		{Verdict{Reached: 3}, false},
 	} {
 		if got := c.v.CutOff(); got != c.want {

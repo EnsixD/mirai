@@ -434,6 +434,9 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			h.d.Log.Warn("subscription protocol", "err", err)
 		}
 	}
+	if (b.Domain != nil || b.PublicHost != nil) && h.d.RenewCert != nil {
+		h.d.RenewCert()
+	}
 	// The bot's Mini App button points at the subscription page.
 	if b.SubPort != nil && h.d.Telegram != nil {
 		h.d.Telegram.Reload()

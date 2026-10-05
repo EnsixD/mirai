@@ -270,6 +270,17 @@ func (c *clientBuilder) transport() {
 				c.q.Set(k, v)
 			}
 		}
+		extra := map[string]any{}
+		for k, camel := range xhttpExtraKeys {
+			if v, ok := x[k]; ok {
+				opts[k] = deepCopy(v)
+				extra[camel] = deepCopy(v)
+			}
+		}
+		if len(extra) > 0 {
+			b, _ := json.Marshal(extra)
+			c.q.Set("extra", string(b))
+		}
 		c.y["network"], c.y["xhttp-opts"] = "xhttp", opts
 		c.q.Set("type", "xhttp")
 	case "grpc":

@@ -289,7 +289,9 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		dns["proxy-server-nameserver"] = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
 		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
 	}
-	cfg["rules"] = append(rules, "MATCH,"+g.Main)
+	// mihomo skips a rule whose selected proxy cannot carry UDP (XHTTP).
+	// Never let that fall through to its implicit DIRECT route.
+	cfg["rules"] = append(rules, "MATCH,"+g.Main, "MATCH,REJECT")
 	return json.MarshalIndent(cfg, "", "  ")
 }
 

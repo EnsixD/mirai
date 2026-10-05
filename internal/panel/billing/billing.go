@@ -533,12 +533,7 @@ func (s *Service) openPayment(ctx context.Context, p db.Payment, title, desc str
 func (s *Service) openInvoice(ctx context.Context, p db.Payment, title, desc string) (sql.NullString, string, error) {
 	switch p.Provider {
 	case Stars:
-		tg := s.telegram()
-		if tg == nil {
-			return sql.NullString{}, "", ErrProviderOff
-		}
-		url, err := tg.InvoiceLink(ctx, title, desc, p.Payload, p.Amount)
-		return sql.NullString{}, url, err
+		return sql.NullString{}, "", ErrProviderOff
 	}
 	if AddonID(p.Provider) != "" {
 		return s.openAddonInvoice(ctx, p, title+" — "+desc)

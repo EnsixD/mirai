@@ -43,12 +43,12 @@ func TestCustomerProfilePurchaseTotals(t *testing.T) {
 	if err := legacy.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if legacy.Buttons[0].Action != "profile" || len(legacy.Buttons) != 2 || legacy.Buttons[1].Action != "subscriptions" {
+	if legacy.Buttons[0].Action != "profile" || len(legacy.Buttons) != 2 || legacy.Buttons[1].Action != "buy" {
 		t.Fatalf("legacy menu not migrated: %+v", legacy.Buttons)
 	}
 	menu := bot.menu(ctx, Config{Buttons: legacy.Buttons}, wordsFor("ru"), 1)
-	if len(menu.InlineKeyboard) != 2 || menu.InlineKeyboard[0][0].CallbackData != "pf" || menu.InlineKeyboard[1][0].CallbackData != "w" {
-		t.Fatal("profile and subscription list are missing")
+	if len(menu.InlineKeyboard) != 2 || menu.InlineKeyboard[0][0].CallbackData != "pf" || menu.InlineKeyboard[1][0].CallbackData != "b" {
+		t.Fatal("profile and purchase entry are missing")
 	}
 }
 

@@ -55,17 +55,24 @@ jobs:
           go test ./internal/panel/tgbot -run '^Test(MenuStructureAndDeletion|AdminButtonsPreserveRowsAndDeletion|CustomerProfilePurchaseTotals)$'
           go test ./internal/panel/api -run '^TestTelegramVisitorsAppearWithoutSubscriptions$'
           go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'
+          go test ./internal/proto -run '^TestMiraiTransportSafety$'
+          go test ./internal/panel/subs -run '^TestXHTTPUDPFailClosed$'
+          go test ./internal/panel/autotune -run '^TestCutOff$'
       - name: Build Linux binaries
         env:
           CGO_ENABLED: '0'
           GOOS: linux
-          GOARCH: amd64
         run: |
           mkdir -p dist/native
-          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai ./cmd/mirai
-          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai-node ./cmd/mirai-node
           printf '%s\n' "$RELEASE_VERSION" > dist/native/VERSION
-          tar -czf dist/mirai-linux-x86_64.tar.gz -C dist/native mirai mirai-node VERSION
+          for arch in amd64 arm64; do
+            export GOARCH="$arch"
+            go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai ./cmd/mirai
+            go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai-node ./cmd/mirai-node
+            name=x86_64; [ "$arch" != arm64 ] || name=aarch64
+            tar -czf "dist/mirai-linux-$name.tar.gz" -C dist/native mirai mirai-node VERSION
+          done
+          cp scripts/native/install.py scripts/native/update.py scripts/native/install.sh dist/
       - name: Sign and verify manifest
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
@@ -76,4 +83,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "Mirai $RELEASE_VERSION — native Linux" --generate-notes --latest dist/mirai-linux-x86_64.tar.gz dist/manifest.json dist/manifest.json.sig
+          gh release create "$GITHUB_REF_NAME" --title "Mirai $RELEASE_VERSION — native Linux" --generate-notes --latest dist/mirai-linux-*.tar.gz dist/manifest.json dist/manifest.json.sig dist/install.sh dist/install.py dist/update.py

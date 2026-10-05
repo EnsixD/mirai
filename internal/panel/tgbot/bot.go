@@ -494,9 +494,9 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 	switch {
 	case up.PreCheckoutQuery != nil:
 		// Ten seconds from Telegram, whatever else the loop waits for: its own goroutine.
-		b.running.Go(func() { b.preCheckout(ctx, c, up.PreCheckoutQuery) })
+		b.running.Go(func() { _ = c.AnswerPreCheckout(ctx, up.PreCheckoutQuery.ID, false, "Telegram Stars are not supported") })
 	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
-		return b.starsPaid(ctx, up.Message)
+		return nil
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
 		if cmd, _, _ := strings.Cut(up.CallbackQuery.Data, ":"); cmd == "ta" || cmd == "tx" {
 			b.onTransfer(ctx, c, out, up.CallbackQuery)

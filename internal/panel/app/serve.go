@@ -88,8 +88,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	set := settings.New(st.Q)
 	// A node's own certificate (Nodes → Certificate) goes first: links pin it only when
 	// clients cannot trust it, so a renewal of a public one changes nothing for them.
-	// Otherwise the local node shares the panel's self-signed certificate and each remote
-	// node gets its own for its address, pinned in links the same way.
+	// Otherwise local listeners share the valid public panel certificate.
 	opts.QUIC = func(n db.Node) (*nodeapi.TLSFiles, string, error) {
 		host := domain.NodeHost(n)
 		if n.Address == "" {
@@ -109,6 +108,20 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 			return &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}, pin, nil
 		} else if err != nil {
 			logger.Warn("tls: a node's own certificate is not used", "node", n.ID, "err", err)
+		}
+		if n.Address == "" {
+			c, _ := holder.Get(nil)
+			// A reverse proxy deployment can provision the same public certificate here.
+			if custom, err := tlscert.LoadCustom(filepath.Join(tlsDir, "custom"), time.Now()); err == nil {
+				c = custom
+			}
+			if c != nil && tlscert.Describe(c, host, time.Now()).Trusted {
+				certPEM, keyPEM, err := tlscert.CustomPEM(c)
+				if err != nil {
+					return nil, "", err
+				}
+				return &nodeapi.TLSFiles{CertPEM: certPEM, KeyPEM: keyPEM}, "", nil
+			}
 		}
 		dir := tlsDir
 		if n.Address != "" {
@@ -151,7 +164,7 @@ func Serve(ctx context.Context, cfg config.Config, version string, web fs.FS) er
 	}
 	opts.SubPortError = subPort.Error
 	var certs *acme.Manager
-	if !cfg.Dev {
+	if !cfg.Dev || cfg.TrustProxy {
 		certs = acme.New(cfg.DataDir, holder, self, settings.New(st.Q), logger, time.Now)
 		opts.Certs = certs
 		opts.HSTS = certs.Trusted

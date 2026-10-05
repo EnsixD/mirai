@@ -102,7 +102,7 @@ type patchInboundInput struct {
 		Enabled     *bool           `json:"enabled,omitempty"`
 		Dest        *string         `json:"dest,omitempty" maxLength:"255"`
 		ServerName  *string         `json:"server_name,omitempty" maxLength:"253" doc:"SNI для клиентов, если dest — IP (цель из подбора соседей)"`
-		Obfs        *string         `json:"obfs,omitempty" enum:"salamander,gecko" doc:"Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат"`
+		Obfs        *string         `json:"obfs,omitempty" enum:"salamander" doc:"Обфускация Hysteria2"`
 		Fingerprint *string         `json:"fingerprint,omitempty" maxLength:"32" doc:"Отпечаток TLS у клиентов: из списка (chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized) или своё — латиница, цифры, _; пусто — общий из настроек"`
 		DisplayName *string         `json:"display_name,omitempty" maxLength:"200" doc:"Можно с эмодзи: «🇳🇱 Нидерланды». Пусто — имя по умолчанию"`
 		Config      *string         `json:"config,omitempty" maxLength:"65536" doc:"Шаблон листенера (YAML)"`
