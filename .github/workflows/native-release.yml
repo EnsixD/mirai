@@ -69,7 +69,7 @@ jobs:
           go test ./internal/panel/domain -run '^TestTariffLimitsPropagateWithoutResettingPaidTime$'
           go test ./internal/panel/domain -run '^TestSeedLeavesCatalogEmpty$'
           go test ./internal/panel/tgbot -run '^TestKeyboardWireGridPreservesActions$'
-          go test ./internal/panel/tgbot -run '^Test(LocalBotStructureAndOwnership|AdminAccountBanAndDeletion|AdminDeviceNavigationAndRevokedPermission|AdminAccess|AdminSubscriptionLifecycle|BannerScreensAndInstructionRows|AdministratorChangeNotice)$'
+          go test ./internal/panel/tgbot -run '^Test(LocalBotStructureAndOwnership|AdminAccountBanAndDeletion|AdminDeviceNavigationAndRevokedPermission|AdminAccess|AdminSubscriptionLifecycle|SubscriptionNavigationRows|BannerScreensAndInstructionRows|AdministratorChangeNotice)$'
           go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'
           go test ./internal/proto -run '^TestMiraiTransportSafety$'
           go test ./internal/panel/subs -run '^TestXHTTPUDPFailClosed$'
