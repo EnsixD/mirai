@@ -1,85 +1,140 @@
 <div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-en-dark.svg">
+  <img src=".github/assets/banner-en-light.svg" alt="Mirai — Your network. Clearly managed." width="1280">
+</picture>
 
-<img src="web/src/assets/mirai-logo.png" alt="Mirai" width="112">
+**A self-hosted VPN panel with subscriptions, Telegram and multi-node management.**
 
-# Mirai
+[![Release](https://img.shields.io/github/v/release/EnsixD/mirai?label=release&color=bf927c)](https://github.com/EnsixD/mirai/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-8caaa0)](LICENSE)
+[![Linux](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-929fc1)](#install)
 
-### Управление VPN, подписками и Telegram-ботом
-
-Инбаунды, пользователи, тарифы и инфраструктура — в едином интерфейсе.
-
-[Исходный код](https://github.com/EnsixD/mirai) · [Релизы](https://github.com/EnsixD/mirai/releases) · [GPL v3](LICENSE)
-
+[Install](#install) · [Screenshots](#screenshots) · [Telegram](#telegram) · [Updates](#updates)
 </div>
 
-## Возможности
+## Built for everyday administration
 
-- **Обзор:** CPU/vCPU, RAM, занятое место на диске.
-- **Инбаунды:** протоколы, модальное создание, названия с флагами и эмодзи.
-- **Подписки:** сроки, трафик, устройства, заморозка и продление.
-- **Тарифы:** планы, пулы и пакеты трафика, промокоды, ЮKassa.
-- **Telegram:** регистрация посетителей бота, профиль с историей покупок и управление подписками.
-- **Админ-меню:** доступ по Telegram ID, управление пользователями; перетаскивание, удаление и размещение кнопок в рядах.
-- **Очистка устройств:** по одному или все сразу; лимиты для пользователей, без ограничений для администратора.
-- **Маршрутизация:** профили Happ и INCY через deeplink, настройки Clash.
-- **Ноды:** инфраструктура, WARP, каскады и сертификаты.
-- **Интерфейс:** темы Mirai и Midnight, плавные модальные окна.
+Mirai brings VPN infrastructure and subscription management into one interface, powered by the [mihomo](https://github.com/MetaCubeX/mihomo) core.
 
-## Telegram-бот
+| Workflow | What Mirai provides |
+| --- | --- |
+| Monitor | CPU/vCPU, RAM, disk, traffic charts and subscription status |
+| Connect | Inbound templates, names with flags and emoji, remote nodes |
+| Manage | Traffic limits, devices, extension, freezing and deletion |
+| Sell | Plans, a one-time trial, traffic packages, promo codes and YooKassa integration |
+| Automate | A built-in Telegram bot with customer and private admin menus |
+| Route | Happ and INCY deeplink profiles, plus Clash routing rules |
+| Customize | Mirai and Midnight themes, animated modals, draggable bot buttons |
+
+Fresh installations start with **no tariffs and no published inbounds**. Add only what you intend to use.
+
+## Screenshots
+
+Current Mirai interface in Russian. These screenshots use an isolated demonstration database: all users, subscriptions, traffic and node metrics shown here are fictional.
+
+### Overview
+
+![Mirai overview with system metrics and subscription statistics](.github/assets/screens/ru/overview.webp)
+
+### Users
+
+![Mirai users with plans, traffic limits and subscription status](.github/assets/screens/ru/users.webp)
+
+## Install
+
+On a fresh **Ubuntu 22.04+ or Debian 12+** server, **amd64 or arm64**:
+
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh | sudo bash
+```
+
+The native installer installs verified binaries, PostgreSQL and Nginx, then starts the panel and its local VPN node as separate systemd services. **Docker and build tools are not required for the panel or VPN nodes.**
+
+Supply a domain with an A/AAAA record pointing to your server to enable HTTPS. The installer checks DNS and obtains or reuses a Let's Encrypt certificate. Ports 80 and 443 must be reachable. On completion it prints the full panel URL, administrator login and password, and saves them to `/root/mirai-login.txt` with root-only permissions.
+
+For unattended installation:
+
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh \
+  | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com
+```
+
+Without a domain the panel uses HTTP. Choose a REALITY camouflage target before publishing an inbound. With a domain, new REALITY templates on the local node default to the panel's own HTTPS website. Choose a VPN port that does not conflict with the public panel port.
+
+### Add a remote VPN node
+
+Create a node in the main panel's **Nodes** page and copy its join key. On the remote server:
+
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh \
+  | sudo bash -s -- --join KEY
+```
+
+A remote node runs the VPN core and a certificate-pinned management connection. It **does not run a second admin panel**. Allow the management port shown in the generated command and the VPN ports you publish through your firewall.
+
+### Manage the installation
+
+```sh
+mirai status
+mirai update
+mirai reset-password
+journalctl -u mirai -u mirai-node --no-pager -n 100
+```
+
+Configuration lives in `/etc/mirai/mirai.env`, runtime data in `/var/lib/mirai`, and verified binaries in `/opt/mirai`. See [native deployment details](scripts/native/README.md).
+
+## Telegram
+
+The bot runs inside the panel. Add a BotFather token and your numeric administrator ID in **Telegram**. Admin actions check that ID on every request.
 
 ```text
-/start → информация о VPN
-         👤 Профиль · 💳 Продлить · 🛒 Купить
-         ⚙️ Админ-панель — только владелец по ID
+/start → VPN description
+         👤 Profile · 💳 Renew · 🛒 Buy
+         ⚙️ Admin panel — administrator only
 
-Профиль → статистика → 📋 Мои подписки
-Мои подписки → список → выбранная подписка
-Подписка → срок, трафик, состояние → 📱 Устройства (количество)
-Устройства → нажатие очищает устройство; 🧹 Очистить все
+Profile → purchase statistics → 📋 My subscriptions
+My subscriptions → choose a subscription → details → 📱 Devices (count)
+Devices → tap a device to clear it, or 🧹 Clear all
 ```
 
-Приветствие и кнопки настраиваются во вкладке **Telegram**. Например, можно разрешить 4 очистки за 30 дней. Очистка всех устройств расходует одну операцию; лимит применяется к каждой подписке.
+Visitors who send `/start` or interact with the bot appear in the panel with their Telegram identity. Telegram does not notify bots when someone merely opens an idle chat.
 
-## Названия подключений
+Customer and admin buttons support drag ordering, deletion and placement on the same row as the previous button. Texts, notifications, device reset quotas and admin actions are configured in the panel. The selected trial plan appears under **Buy**, can be claimed once per Telegram account, and disappears after use.
 
-**Инбаунды → Настроить → Имя в подписке.** Флаги и эмодзи передаются клиентам: `🇩🇪 DE #1 | WS [Мобильный] 🛡️`. В редакторе есть быстрый выбор значков и превью.
+## Connections and routing
 
-## Локальная разработка без Docker
+The catalog includes **VLESS TCP REALITY**, **VLESS gRPC REALITY**, **VLESS WebSocket TLS**, **VLESS XHTTP REALITY**, **Hysteria2**, **Trojan REALITY**, and an XHTTP post-quantum preset. Custom templates are validated before saving.
 
-В подготовленном окружении Windows запускайте `mirai.cmd start`; состояние проверяется командой `mirai.cmd status`.
+WebSocket uses ordinary TLS: REALITY over WebSocket is rejected. Supported XHTTP options reach client profiles; unknown options are rejected. Clash subscriptions include a final reject rule so an unsupported UDP transport cannot silently fall through to DIRECT. Explicit direct-routing rules still apply.
 
-Панель: `http://127.0.0.1:5173/login`. Реквизиты — `.local/login.txt`; этот каталог не публикуется в Git.
+Subscription URLs can use a separate domain and a root path such as `https://subs.example.com/A7b2X9mQ4`. New IDs use configurable random letters and digits, 9–32 characters. Existing links remain valid. Inbound display names preserve emoji and flags in compatible clients.
 
-Для нового окружения нужны Go, Node.js и PostgreSQL. Настройте базу и сервер в конфигурации Mirai. Зависимости интерфейса: `web/package.json`.
+Traffic for devices bound to distinct HWID slots is displayed in the panel, subscription page and bot. Clients sharing one slot share its counters; this is not an exact per-IP breakdown.
 
-```powershell
-# Из каталога web
-npm ci
-npm run dev
+## Updates
 
-# Из корня проекта
-go build -o bin/mirai.exe ./cmd/mirai
+Native releases use `native-vX.Y.Z.R` and include both architectures. The settings icon indicates an available panel update.
+
+The updater verifies an **Ed25519-signed manifest** and archive SHA-256, backs up binaries and PostgreSQL, then restarts services. A failed health check triggers restoration of the saved installation and database. Backups remain in `/var/backups/mirai`. Automatic updates are disabled by default and can be enabled in Settings.
+
+Default service limits are **256 MB** for the panel and **448 MB** for the VPN node. Idle usage is much lower; capacity depends on protocols, traffic and concurrent connections. PostgreSQL, Nginx and the operating system also need memory.
+
+## Development
+
+Mirai uses Go, PostgreSQL, React, TypeScript and Vite. The UI is embedded into the panel binary.
+
+```sh
+cd web
+pnpm install --frozen-lockfile
+pnpm build
+cd ..
+go build ./cmd/mirai
+go build ./cmd/mirai-node
 ```
 
-## Установка и обновления
+The native release workflow compiles all Go packages and runs current Mirai contract and safety tests against PostgreSQL before publishing signed artifacts.
 
-Linux-установщик расположен в [`installer/install.sh`](installer/install.sh). Развёртывание на VPS использует контейнеры, локальный запуск — обычные процессы.
+## License and attribution
 
-Готовые установочные артефакты публикуются в [релизах EnsixD/mirai](https://github.com/EnsixD/mirai/releases). После успешной установки выводятся адрес панели, логин и пароль администратора. Пароль существующего администратора автоматически не сбрасывается.
-
-Команды: `mirai`, `mirai status`, `mirai update`, `mirai reset-password`.
-
-Обновления проверяются по релизам этого репозитория. Коммиты в `main` сами по себе не являются готовым обновлением: нужен релиз с артефактами. Доступное обновление отмечается индикатором в настройках.
-
-## Структура
-
-| Каталог | Назначение |
-| --- | --- |
-| `cmd/mirai` | Сервер и CLI |
-| `internal/panel` | API, подписки, Telegram, база |
-| `web` | React / TypeScript / Vite |
-| `installer` | Установка и управление на Linux |
-
-## Лицензия
-
-[GNU GPL v3](LICENSE). Mirai развивается на основе открытого проекта Mikan и ядра mihomo; исходные лицензионные уведомления сохранены.
+Mirai is distributed under [GPL-3.0](LICENSE). It is derived from [Mikan](https://github.com/Miroshka000/mikan) and uses [mihomo](https://github.com/MetaCubeX/mihomo). Original copyright notices and license obligations are preserved.

@@ -3,6 +3,22 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.5.0.3
+### en
+- Device traffic counters for bound HWID slots, visible in the admin panel, subscription page and Telegram bot.
+- A public cover website for REALITY self-steal; optional static files without directory listings. New local REALITY inbounds default to the panel domain when configured.
+- Removed retired protocol renderers, templates and payment settings from the public interface. WebSocket uses TLS, not REALITY.
+- Native installer fixes: interactive curl installation, atomic binary replacement, readable environment permissions and HTTP links without a domain.
+- Native updater supports older Python versions and attempts to restart services even if database restoration fails.
+- English documentation and repository About, new Mirai banners, Russian screenshots with fictional demo data; obsolete assets and temporary capture files removed.
+
+### ru
+- Учёт трафика привязанных устройств в панели, подписке и Telegram.
+- Публичная страница для self-steal REALITY и поддержка папки со статикой.
+- Удалены устаревшие протоколы из генераторов и поля старых платёжных систем из интерфейса.
+- Исправлены нативная установка и восстановление после неудачного обновления.
+- Новый английский README, баннер Mirai и русские скриншоты с демонстрационными данными.
+
 ## 0.5.0.1
 ### en
 - The installer no longer stops when nginx or Caddy holds ports 80 or 443. The protocols whose port is taken get other free ports. With a domain, it offers to add the Let's Encrypt rule to nginx or Caddy: it backs up the config, checks it and rolls back on an error. Without your consent it only shows the lines to add.
