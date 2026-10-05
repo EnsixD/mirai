@@ -80,7 +80,7 @@ ORDER BY payments.id DESC LIMIT CAST(sqlc.arg(lim) AS BIGINT);
 
 -- name: PaymentTotals :many
 SELECT currency, count(*) AS n, CAST(COALESCE(sum(amount), 0) AS BIGINT) AS total
-FROM payments WHERE status = 'applied' AND applied_at >= $1 GROUP BY currency;
+FROM payments WHERE status = 'applied' AND applied_at >= $1 AND COALESCE(external_id,'') NOT LIKE 'test:%' GROUP BY currency;
 
 -- name: ListTariffsOnSale :many
 SELECT * FROM tariffs WHERE archived = 0 AND on_sale = 1 ORDER BY sort, id;

@@ -609,7 +609,7 @@ func (q *Queries) MarkPaymentRefunded(ctx context.Context, arg MarkPaymentRefund
 
 const paymentTotals = `-- name: PaymentTotals :many
 SELECT currency, count(*) AS n, CAST(COALESCE(sum(amount), 0) AS BIGINT) AS total
-FROM payments WHERE status = 'applied' AND applied_at >= $1 GROUP BY currency
+FROM payments WHERE status = 'applied' AND applied_at >= $1 AND COALESCE(external_id,'') NOT LIKE 'test:%' GROUP BY currency
 `
 
 type PaymentTotalsRow struct {

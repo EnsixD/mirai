@@ -22,7 +22,7 @@ Mirai brings VPN infrastructure and subscription management into one interface, 
 | Monitor | CPU/vCPU, RAM, disk, traffic charts and subscription status |
 | Connect | Inbound templates, names with flags and emoji, remote nodes |
 | Manage | Traffic limits, devices, extension, freezing and deletion |
-| Sell | Plans, a one-time trial, traffic packages, promo codes and YooKassa integration |
+| Sell | Plans, a one-time trial, traffic packages, promo codes and built-in YooKassa with separate test/live shops |
 | Automate | A built-in Telegram bot with customer and private admin menus |
 | Route | Happ and INCY deeplink profiles, plus Clash routing rules |
 | Customize | Mirai and Midnight themes, animated modals, draggable bot buttons |

@@ -57,8 +57,10 @@ func (e *Error) Error() string { return fmt.Sprintf("adapter %d %s: %s", e.Statu
 var ErrUnreachable = errors.New("addon_unreachable")
 
 type Client struct {
-	base, token string
-	hc          *http.Client
+	base, token                       string
+	hc                                *http.Client
+	yoo                               bool
+	authUser, authSecret, idempotency string
 }
 
 func NewClient(base, token string, hc *http.Client) *Client {
@@ -79,6 +81,12 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.authUser != "" {
+		req.SetBasicAuth(c.authUser, c.authSecret)
+	}
+	if c.idempotency != "" {
+		req.Header.Set("Idempotence-Key", c.idempotency)
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -115,6 +123,9 @@ func (c *Client) Info(ctx context.Context) (Info, error) {
 
 // Check asks the provider whether the settings work.
 func (c *Client) Check(ctx context.Context, s Settings) error {
+	if c.yoo {
+		return c.yooCheck(ctx, s)
+	}
 	return c.call(ctx, http.MethodPost, "/v1/check", map[string]any{"settings": s}, nil)
 }
 
@@ -135,6 +146,9 @@ type Invoice struct {
 }
 
 func (c *Client) CreateInvoice(ctx context.Context, r InvoiceRequest) (Invoice, error) {
+	if c.yoo {
+		return c.yooInvoice(ctx, r)
+	}
 	var inv Invoice
 	if err := c.call(ctx, http.MethodPost, "/v1/invoices", r, &inv); err != nil {
 		return inv, err
@@ -153,6 +167,9 @@ type Status struct {
 }
 
 func (c *Client) Status(ctx context.Context, s Settings, externalID string) (Status, error) {
+	if c.yoo {
+		return c.yooStatus(ctx, s, externalID)
+	}
 	var st Status
 	err := c.call(ctx, http.MethodPost, "/v1/status", map[string]any{"settings": s, "external_id": externalID}, &st)
 	return st, err
@@ -161,6 +178,9 @@ func (c *Client) Status(ctx context.Context, s Settings, externalID string) (Sta
 // Webhook hands the provider's request to the adapter, which says which invoice it is
 // about ("" for one to ignore). The caller checks the invoice's status before trusting it.
 func (c *Client) Webhook(ctx context.Context, s Settings, remoteIP string, headers http.Header, body []byte) (string, error) {
+	if c.yoo {
+		return yooWebhook(body)
+	}
 	var out struct {
 		ExternalID string `json:"external_id"`
 	}
@@ -172,5 +192,8 @@ func (c *Client) Webhook(ctx context.Context, s Settings, remoteIP string, heade
 // Refund sends a stable idempotency key so adapters can safely handle concurrent
 // notifications and retries for the same late promo payment.
 func (c *Client) Refund(ctx context.Context, s Settings, externalID string, amount int64, idempotencyKey string) error {
+	if c.yoo {
+		return c.yooRefund(ctx, s, externalID, amount, idempotencyKey)
+	}
 	return c.call(ctx, http.MethodPost, "/v1/refund", map[string]any{"settings": s, "external_id": externalID, "amount": amount, "idempotency_key": idempotencyKey}, nil)
 }

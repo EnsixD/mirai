@@ -451,6 +451,16 @@ func (s *Service) newPayment(ctx context.Context, tgID int64, now time.Time,
 }
 
 func (s *Service) matchesOpenPayment(ctx context.Context, q *db.Queries, existing db.Payment, amount int64, code string) (bool, error) {
+	if existing.Provider == "addon:yookassa" && s.d.Addons != nil && s.d.Addons.NativeYooKassa() {
+		cfg, err := s.AddonConfig(ctx, "yookassa")
+		if err != nil {
+			return false, err
+		}
+		test, _ := cfg.Values["test_mode"].(bool)
+		if existing.ExternalID.Valid && strings.HasPrefix(existing.ExternalID.String, "test:") != test {
+			return false, nil
+		}
+	}
 	if strings.TrimSpace(code) == "" {
 		if existing.Amount != amount {
 			return false, nil

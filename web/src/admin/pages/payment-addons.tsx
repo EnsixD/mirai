@@ -59,12 +59,12 @@ function Addons({ d, selling, onRetry, retrying }: { d: Addons; selling: boolean
     <section className="card glass reveal" style={{ "--i": 2 } as React.CSSProperties} aria-busy={busy}>
       <div className="card-head">
         <div className="min-w-0">
-          <h2 className="card-title">{t("addons.title")}</h2>
-          <div className="card-sub">{t("addons.sub")}</div>
+          <h2 className="card-title">ЮKassa</h2>
+          <div className="card-sub">Прямое подключение · тестовый и боевой магазины · автоматическая выдача подписок</div>
         </div>
-        <Button size="sm" onClick={() => setShop(true)} disabled={!d.supported}>
+        {!d.installed.some(a=>a.version==="native") && <Button size="sm" onClick={() => setShop(true)} disabled={!d.supported}>
           <Plus size={16} aria-hidden /> {t("addons.add")}
-        </Button>
+        </Button>}
       </div>
       {!d.supported ? (
         <div className="banner warn mb-4" role="status">
@@ -152,7 +152,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-[13px] font-semibold">
             {name}
-            <span className="num text-xs font-normal text-[var(--ink-500)]">v{a.version}</span>
+            <span className="num text-xs font-normal text-[var(--ink-500)]">{a.version==="native" ? values.test_mode ? "Тестовый магазин" : "Боевой магазин" : `v${a.version}`}</span>
             {failed ? <Pill tone="bad">{t("addons.failed")}</Pill> : enabled && selling ? <Pill tone={a.available ? "ok" : "warn"}>{a.available ? t("payments.live") : t("payments.notReady")}</Pill> : null}
           </div>
           {failed && a.error ? <div className="mt-1 break-words text-xs text-[var(--berry-600)]">{a.error}</div> : null}
@@ -165,7 +165,7 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
           {general}
         </div>
       ) : null}
-      {enabled && !a.info_error ? (
+      {(enabled || a.version==="native") && !a.info_error ? (
         <>
           {localized(a.help, "") ? <p className="mb-3 text-xs text-[var(--ink-500)]">{localized(a.help, "")}</p> : null}
           <div className="grid gap-x-3 sm:grid-cols-2">
@@ -175,9 +175,10 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
               const err = errors[`settings.${f.key}`];
               if (f.type === "bool")
                 return (
-                  <label key={f.key} className="mb-3 flex items-center gap-2 text-[13px] sm:col-span-2">
-                    <input type="checkbox" className="check" checked={values[f.key] === true} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.checked }))} /> {label}
-                  </label>
+                  <div key={f.key} className="mb-4 flex items-center justify-between gap-3 text-[13px] sm:col-span-2">
+                    <div><div className="font-semibold">{label}</div><div className="text-xs text-[var(--ink-500)]">{values[f.key] ? "Оплата тестовыми картами, реальное списание не производится" : "Реальные платежи через боевой магазин"}</div></div>
+                    <Switch checked={values[f.key]===true} onChange={value=>setValues(v=>({...v,[f.key]:value}))} label={label}/>
+                  </div>
                 );
               return (
                 <Field key={f.key} label={label} htmlFor={id} error={err}>
@@ -200,14 +201,14 @@ function AddonBlock({ a, busy, selling }: { a: Addon; busy: boolean; selling: bo
         </>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {!failed && !a.info_error && (enabled || a.enabled) ? (
+        {!failed && !a.info_error && (enabled || a.enabled || a.version==="native") ? (
           <Button type="submit" size="sm" variant="primary" loading={save.isPending}>
             {t("common.save")}
           </Button>
         ) : null}
-        <Button type="button" size="sm" variant="danger" onClick={() => setRemove(true)} disabled={busy}>
+        {a.version!=="native" && <Button type="button" size="sm" variant="danger" onClick={() => setRemove(true)} disabled={busy}>
           <Trash2 size={16} aria-hidden /> {t("addons.remove")}
-        </Button>
+        </Button>}
       </div>
       <Confirm
         open={remove}

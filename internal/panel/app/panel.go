@@ -186,6 +186,7 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 		return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + paths.Sub
 	}
 	p.Addons = addons.New(o.DataDir, o.AddonsCatalog, o.Version, o.Log, o.Now)
+	p.Addons.EnableYooKassa()
 	deps.Addons = p.Addons
 	deps.DNS = o.DNS
 	promos := promo.New(st, o.Now)

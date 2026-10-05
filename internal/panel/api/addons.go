@@ -239,6 +239,9 @@ func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsO
 // removeAddon keeps the adapter's settings and its payments: installed again, it takes up
 // where it was.
 func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOutput, error) {
+	if h.d.Addons != nil && h.d.Addons.NativeYooKassa() && in.ID == "yookassa" {
+		return nil, huma.Error409Conflict("Disable YooKassa in payment settings")
+	}
 	if h.d.Addons == nil {
 		return nil, huma.Error409Conflict("addons_unavailable")
 	}

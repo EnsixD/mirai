@@ -12,6 +12,6 @@ func (q *Queries) CustomerPurchases(ctx context.Context, chat int64) (CustomerPu
  COUNT(*) FILTER (WHERE p.kind IN ('new','renew')),
  COUNT(*) FILTER (WHERE p.kind IN ('new','renew') AND COALESCE(p.term_days,t.duration_days,-1)=0)
  FROM payments p LEFT JOIN tariffs t ON t.id=p.tariff_id
- WHERE p.tg_id=$1 AND p.status='applied'`, chat).Scan(&result.RublesKopecks, &result.Days, &result.Purchases, &result.Unlimited)
+ WHERE p.tg_id=$1 AND p.status='applied' AND COALESCE(p.external_id,'') NOT LIKE 'test:%'`, chat).Scan(&result.RublesKopecks, &result.Days, &result.Purchases, &result.Unlimited)
 	return result, err
 }

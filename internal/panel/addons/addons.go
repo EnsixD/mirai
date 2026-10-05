@@ -165,10 +165,11 @@ type Manager struct {
 	log            *slog.Logger
 	now            func() time.Time
 
-	mu      sync.Mutex
-	catalog *Catalog
-	fetched time.Time
-	infos   map[string]cachedInfo
+	mu        sync.Mutex
+	catalog   *Catalog
+	fetched   time.Time
+	infos     map[string]cachedInfo
+	nativeYoo bool
 }
 
 type cachedInfo struct {
@@ -192,13 +193,19 @@ func New(dataDir, catalogURL, panelVersion string, log *slog.Logger, now func() 
 }
 
 // Supported: the panel sees the server's data directory, so the host can run adapters.
-func (m *Manager) Supported() bool { return m.dir != "" }
+func (m *Manager) Supported() bool { return m.nativeYoo || m.dir != "" }
+
+func (m *Manager) EnableYooKassa()      { m.nativeYoo = true }
+func (m *Manager) NativeYooKassa() bool { return m.nativeYoo }
 
 // SetKey replaces the catalog key (tests sign with their own).
 func (m *Manager) SetKey(pub ed25519.PublicKey) { m.pub = pub }
 
 // Catalog is the signed catalog, fetched at most every ten minutes.
 func (m *Manager) Catalog(ctx context.Context) (Catalog, error) {
+	if m.nativeYoo {
+		return Catalog{Version: 1, Adapters: []Entry{{ID: "yookassa", Name: YooKassaInfo().Name, Version: "native", Digest: "native", Description: Text{"ru": "Прямое подключение ЮKassa без контейнеров", "en": "Direct YooKassa integration without containers"}}}}, nil
+	}
 	m.mu.Lock()
 	if m.catalog != nil && m.now().Sub(m.fetched) < 10*time.Minute {
 		c := *m.catalog
@@ -243,6 +250,10 @@ func (m *Manager) get(ctx context.Context, url string, limit int64) ([]byte, err
 // State is what the host reports; nothing installed when it has not written anything.
 func (m *Manager) State() (State, error) {
 	s := State{Adapters: map[string]Installed{}}
+	if m.nativeYoo {
+		s.Adapters["yookassa"] = Installed{Version: "native", Digest: "native", Status: "running"}
+		return s, nil
+	}
 	if m.dir == "" {
 		return s, nil
 	}
@@ -265,6 +276,9 @@ func (m *Manager) State() (State, error) {
 // Pending is the request the host has not taken yet.
 func (m *Manager) Pending() (Request, bool) {
 	var r Request
+	if m.nativeYoo {
+		return r, false
+	}
 	if m.dir == "" {
 		return r, false
 	}
@@ -311,6 +325,9 @@ func writeFile(dir, name string, v any) error {
 
 // Client talks to an installed, running adapter.
 func (m *Manager) Client(id string) (*Client, error) {
+	if m.nativeYoo && id == "yookassa" {
+		return &Client{base: "https://api.yookassa.ru/v3", hc: m.adapters, yoo: true}, nil
+	}
 	s, err := m.State()
 	if err != nil {
 		return nil, err
@@ -324,6 +341,9 @@ func (m *Manager) Client(id string) (*Client, error) {
 
 // Info is the adapter's own description, asked once per installed image.
 func (m *Manager) Info(ctx context.Context, id string) (Info, error) {
+	if m.nativeYoo && id == "yookassa" {
+		return YooKassaInfo(), nil
+	}
 	s, err := m.State()
 	if err != nil {
 		return Info{}, err

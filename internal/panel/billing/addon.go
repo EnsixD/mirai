@@ -174,6 +174,9 @@ func (s *Service) availableAddons(ctx context.Context) []string {
 }
 
 func complete(info addons.Info, c AddonConfig) bool {
+	if info.ID == "yookassa" && info.Version == "native" {
+		return addons.YooKassaConfigured(c.Values)
+	}
 	for _, f := range info.Settings {
 		if f.Required && c.Values[f.Key] == nil {
 			return false

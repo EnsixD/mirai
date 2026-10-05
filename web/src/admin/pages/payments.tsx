@@ -171,6 +171,7 @@ function PaymentRow({ p, provider }: { p: Payment; provider: string }) {
           <b className="num text-[13px]">{money(p.amount, p.currency)}</b>
           <span className="truncate text-[13px]">{p.term_days != null ? `${p.tariff_name} · ${p.term_days ? days(p.term_days) : t("time.forever")}` : p.tariff_name}</span>
           <Pill tone={STATUS_TONE[p.status]}>{t(`payments.statuses.${p.status}`)}</Pill>
+          {p.external_id?.startsWith("test:") && <Pill tone="warn">Тестовая оплата</Pill>}
         </div>
         <div className="mt-1 text-xs text-[var(--ink-500)]">
           {dateShort(p.created_at)} {time(p.created_at)} · {provider} · {p.kind === "new" ? t("payments.kindNew") : p.kind === "package" ? t("payments.kindPackage") : t("payments.kindRenew")} · {buyer}
