@@ -21,6 +21,10 @@ func TestTelegramVisitorsAppearWithoutSubscriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := handlers{d: Deps{Store: st, Settings: settings.New(st.Q), Now: time.Now}}
+	overview, err := h.overview(ctx, nil)
+	if err != nil || overview.Body.UsersTotal != 1 {
+		t.Fatal("navigation counter excludes Telegram visitor", err)
+	}
 	result, err := h.listUsers(ctx, &listUsersInput{State: "all", Limit: 100})
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +63,33 @@ func TestTelegramVisitorsAppearWithoutSubscriptions(t *testing.T) {
 	}
 	if len(result.Body.Items) != 1 || result.Body.Items[0].ID != user.ID || result.Body.Items[0].TariffID == nil || result.Body.Items[0].Telegram == nil || result.Body.Items[0].Contact != "@renamed" {
 		t.Fatalf("visitor duplicated after issuing subscription: %+v", result.Body)
+	}
+	devices := domain.NewDevices(st, domain.NewPool(st, clock), visitorChanges{}, clock)
+	if _, err := devices.Bind(ctx, user, domain.DeviceInfo{HWID: "HappDevice123456789", OS: "Windows", App: "Happ/4.4.1"}, false); err != nil {
+		t.Fatal(err)
+	}
+	result, err = h.listUsers(ctx, &listUsersInput{State: "all", Limit: 100})
+	if err != nil || result.Body.Items[0].BoundDevices != 1 || len(result.Body.Items[0].OnlineIPs) != 0 {
+		t.Fatal("offline registered device was not counted", err)
+	}
+	if count, err := st.Q.CountTelegramVisitors(ctx); err != nil || count != 0 {
+		t.Fatal("subscribed account counted twice", count, err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,user_id,kind,tariff_id,tariff_name,amount,currency,status,created_at,term_days) VALUES('addon:yookassa','delete-test',987654,$1,'new',$2,'Paid',20000,'RUB','applied',1,30)`, user.ID, tariff.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Delete(ctx, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = h.listUsers(ctx, &listUsersInput{State: "all", Limit: 100})
+	if err != nil || len(result.Body.Items) != 1 || result.Body.Items[0].State != "visitor" || result.Body.Items[0].Contact != "@renamed" {
+		t.Fatal("deleting the subscription removed the Telegram profile", err)
+	}
+	if count, err := st.Q.CountTelegramVisitors(ctx); err != nil || count != 1 {
+		t.Fatal("unsubscribed account absent from counter", count, err)
+	}
+	if totals, err := st.Q.CustomerPurchases(ctx, 987654); err != nil || totals.RublesKopecks != 20000 || totals.Days != 30 {
+		t.Fatal("subscription deletion lost customer purchase history", err)
 	}
 
 }

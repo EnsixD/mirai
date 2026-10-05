@@ -18,7 +18,7 @@ export function DevicesSection({ u }: { u: User }) {
   const setLimit = (n: number | null) =>
     update.mutate({ id: u.id, body: n === null ? { devices_unlimited: true } : { device_limit: n } }, { onError: (e) => toast.error(errorText(e)) });
   return (
-    <Section title={t("userDrawer.devices")} aside={t("userDrawer.devicesAside", { online: u.online_ips.length, limit: u.device_limit ?? "∞" })}>
+    <Section title={t("userDrawer.devices")} aside={t("userDrawer.devicesAside", { online: u.bound_devices, limit: u.device_limit ?? "∞" })}>
       <div className="mb-4 flex items-center gap-2 text-[13px]">
         <span className="text-[var(--ink-600)]">{t("userDrawer.deviceLimit")}</span>
         <div className="seg" role="group" aria-label={t("userDrawer.deviceLimit")}>

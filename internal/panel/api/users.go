@@ -39,6 +39,7 @@ type UserView struct {
 	TotalUp       int64         `json:"total_up"`
 	TotalDown     int64         `json:"total_down"`
 	DeviceLimit   *int64        `json:"device_limit"`
+	BoundDevices  int64         `json:"bound_devices" doc:"Занятые места: зарегистрированные устройства, включая отключённые от сети"`
 	ResetStrategy string        `json:"reset_strategy" enum:"none,month_start,period" doc:"month_start — раз в месяц: в день оплаты, без него 1-го числа"`
 	ResetsAt      *time.Time    `json:"resets_at"`
 	ExpiresAt     *time.Time    `json:"expires_at"`
@@ -344,9 +345,14 @@ func (h *handlers) listUsers(ctx context.Context, in *listUsersInput) (*listUser
 		return nil, err
 	}
 	env := h.userEnv(ctx)
+	deviceCounts, err := h.d.Store.Q.BoundDeviceCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
 	views := []UserView{}
 	for _, user := range users {
 		view := h.viewUser(user, names[user.ID], grants, env)
+		view.BoundDevices = deviceCounts[user.ID]
 		if account, ok := linked[user.ID]; ok {
 			view.Telegram = &TelegramLink{ID: account.ID, Username: account.Username, Name: account.Name}
 			if account.Name != "" {
@@ -413,7 +419,12 @@ func (h *handlers) userResult(ctx context.Context, u db.User, err error) (*userO
 	if err != nil {
 		return nil, err
 	}
-	return &userOutput{Body: h.viewUser(u, slots, grants, h.userEnv(ctx))}, nil
+	view := h.viewUser(u, slots, grants, h.userEnv(ctx))
+	view.BoundDevices, err = h.d.Store.Q.CountBoundDevices(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &userOutput{Body: view}, nil
 }
 
 func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOutput, error) {

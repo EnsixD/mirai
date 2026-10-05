@@ -77,6 +77,11 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 		return nil, err
 	}
 	b.UsersTotal, b.UsersActive, b.Expiring7d = int(counts.Total), int(counts.Active+counts.Expiring), int(counts.Expiring)
+	visitors, err := h.d.Store.Q.CountTelegramVisitors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b.UsersTotal += int(visitors)
 	if online := h.online(); len(online) > 0 {
 		// Online counts users: one with several bound devices has several slots online.
 		names := make([]string, 0, len(online))

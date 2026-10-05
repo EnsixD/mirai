@@ -2979,6 +2979,11 @@ export interface components {
              * @description День месяца, в который заканчивается срок (1–31); null — продление днями
              */
             billing_day: number | null;
+            /**
+             * Format: int64
+             * @description Занятые места: зарегистрированные устройства, включая отключённые от сети
+             */
+            bound_devices: number;
             contact: string;
             /** Format: date-time */
             created_at: string;

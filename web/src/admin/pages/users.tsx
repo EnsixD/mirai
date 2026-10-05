@@ -221,7 +221,7 @@ function Expiry({ u }: { u: User }) {
 // subscribes to the language itself.
 const UserRow = memo(function UserRow({ u, tariff, selected, onToggle, onOpen }: { u: User; tariff?: Tariff; selected: boolean; onToggle: (id: number) => void; onOpen: (id: number) => void }) {
   useLocale();
-  const devices = u.online_ips.length;
+  const devices = u.bound_devices;
   // The row is clickable for the mouse; the keyboard and screen readers use the link in
   // the name cell and the checkbox, each a control of its own.
   return (

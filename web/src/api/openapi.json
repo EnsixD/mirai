@@ -4736,6 +4736,11 @@
               "null"
             ]
           },
+          "bound_devices": {
+            "description": "Занятые места: зарегистрированные устройства, включая отключённые от сети",
+            "format": "int64",
+            "type": "integer"
+          },
           "contact": {
             "type": "string"
           },
@@ -4883,6 +4888,7 @@
           "total_up",
           "total_down",
           "device_limit",
+          "bound_devices",
           "reset_strategy",
           "resets_at",
           "expires_at",
