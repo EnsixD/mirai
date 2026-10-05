@@ -1,0 +1,79 @@
+name: native release
+on:
+  push:
+    tags: ['native-v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: mirai_test
+          POSTGRES_PASSWORD: mirai_test
+          POSTGRES_DB: mirai_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U mirai_test" --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      MIRAI_TEST_DATABASE_URL: postgres://mirai_test:mirai_test@localhost:5432/mirai_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate tag and main ancestry
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          echo "RELEASE_VERSION=${GITHUB_REF_NAME#native-v}" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.27'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build frontend
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Compile all packages and verify current Mirai contracts
+        run: |
+          go test ./... -run '^$'
+          go test ./internal/release ./internal/panel/server ./internal/panel/settings
+          go test ./internal/panel/billing -run '^TestTrial(OncePerAccount|AlsoAvailableToExistingAccounts|TapsAtOnce|OnAnArchivedTariff|OnATariffWithoutTerm|IsTheTariffWhole)$'
+          go test ./internal/panel/domain -run '^Test(ShortSubscriptionTokens|DeviceResetQuota|TariffDeletePreservesSubscriptionsAndReceipts)$'
+          go test ./internal/panel/tgbot -run '^Test(MenuStructureAndDeletion|AdminButtonsPreserveRowsAndDeletion|CustomerProfilePurchaseTotals)$'
+          go test ./internal/panel/api -run '^TestTelegramVisitorsAppearWithoutSubscriptions$'
+          go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'
+      - name: Build Linux binaries
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist/native
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai ./cmd/mirai
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/native/mirai-node ./cmd/mirai-node
+          printf '%s\n' "$RELEASE_VERSION" > dist/native/VERSION
+          tar -czf dist/mirai-linux-x86_64.tar.gz -C dist/native mirai mirai-node VERSION
+      - name: Sign and verify manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          python3 scripts/native/release.py
+          go run ./cmd/mirai-release verify dist/manifest.json
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "Mirai $RELEASE_VERSION — native Linux" --generate-notes --latest dist/mirai-linux-x86_64.tar.gz dist/manifest.json dist/manifest.json.sig
