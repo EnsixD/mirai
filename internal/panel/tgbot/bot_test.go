@@ -256,6 +256,16 @@ func setup(t *testing.T, with ...func(e *env, d *Deps)) *env {
 		}
 	}
 	pool := domain.NewPool(e.st, e.clock)
+	// Production starts without demo tariffs; tests create their own fixtures.
+	for _, input := range []db.CreateTariffParams{
+		{Name: "Trial", DurationDays: 3, ResetStrategy: "none", CreatedAt: e.now.Unix()},
+		{Name: "Standard", DurationDays: 30, ResetStrategy: "none", CreatedAt: e.now.Unix()},
+		{Name: "Unlimited", DurationDays: 90, ResetStrategy: "none", CreatedAt: e.now.Unix()},
+	} {
+		if _, err := e.st.Q.CreateTariff(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
 	tariffs, _ := e.st.Q.ListTariffs(ctx)
 	if e.user, err = domain.NewUsers(e.st, pool, noChanges{}, e.clock).Create(ctx, domain.CreateInput{Name: "Анна", TariffID: tariffs[1].ID}); err != nil {
 		t.Fatal(err)

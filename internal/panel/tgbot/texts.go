@@ -3,6 +3,7 @@ package tgbot
 import (
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -41,13 +42,13 @@ type words struct {
 }
 
 var ru = words{
-	welcome:    "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
-	main:       "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
-	renew:      "Продление подписки «{name}».\n\nВыберите срок и оплатите — оплаченные дни добавятся к оставшемуся сроку. Если тарифы сейчас недоступны, обратитесь в поддержку.",
-	expiring:   "⏳ Подписка {subscription_url} заканчивается {until}: осталось {days}.",
-	expired:    "⛔️ Подписка {subscription_url} закончилась. Чтобы продлить, напишите в поддержку.",
-	traffic90:  "📦 Израсходовано 90% трафика подписки «{name}»: осталось {left}.",
-	trafficEnd: "📦 Трафик подписки «{name}» на этот период закончился. Обновится {reset}.",
+	welcome:    "🌐 <b>{brand}</b>\n<i>Удобный доступ к интернету — всё нужное в одном месте.</i>\n\n📱 <b>Подключайтесь на своих устройствах</b>\nДобавьте ссылку подписки в Happ, INCY или другое совместимое приложение. Доступный трафик и количество устройств зависят от выбранного тарифа.\n\n👤 <b>Ваш личный кабинет</b>\nВ профиле — история покупок, в «Моих подписках» — сроки, ссылки и управление устройствами.\n\n🛒 <b>Начните с подходящего тарифа</b>\nНовая подписка — в разделе «Купить», продление действующей — в разделе «Продлить».\n\n👇 Выберите действие ниже.",
+	main:       "🌐 <b>{brand}</b>\n<i>Удобный доступ к интернету — всё нужное в одном месте.</i>\n\n📱 <b>Подключайтесь на своих устройствах</b>\nДобавьте ссылку подписки в Happ, INCY или другое совместимое приложение. Доступный трафик и количество устройств зависят от выбранного тарифа.\n\n👤 <b>Ваш личный кабинет</b>\nВ профиле — история покупок, в «Моих подписках» — сроки, ссылки и управление устройствами.\n\n🛒 <b>Начните с подходящего тарифа</b>\nНовая подписка — в разделе «Купить», продление действующей — в разделе «Продлить».\n\n👇 Выберите действие ниже.",
+	renew:      "💳 <b>Продление подписки</b>\n\n🔗 {subscription_url}\n📅 Действует до: {until}\n\nВыберите срок и завершите оплату. Новые дни добавятся к оставшемуся сроку — действующие дни не потеряются, а ссылка останется прежней.\n\nЕсли доступ уже закончился, продление вернёт его после подтверждения оплаты. Если тарифы недоступны, обратитесь в поддержку.",
+	expiring:   "⏳ <b>Подписка скоро закончится</b>\n\n🔗 {subscription_url}\n📅 Окончание: {until}\n🕒 Осталось: {days}\n\nЧтобы продолжить пользоваться VPN без перерыва, откройте «Продлить» в главном меню и выберите срок. Оплаченные дни добавятся к оставшимся, а ссылка для подключения сохранится.",
+	expired:    "⛔️ <b>Срок подписки закончился</b>\n\n🔗 {subscription_url}\n📅 Доступ был оплачен до: {until}\n\nПодключение приостановлено. Откройте «Продлить» в главном меню, выберите срок и завершите оплату. После подтверждения доступ восстановится — заново добавлять ссылку в приложение не нужно.\n\nЕсли нужна помощь с продлением, напишите в поддержку.",
+	traffic90:  "📊 <b>Осталось немного трафика</b>\n\n🔗 {subscription_url}\nИзрасходовано 90% доступного объёма.\n📦 Использовано: {used} из {limit}\n🟢 Остаток: {left}\n\nПроверьте расход в «Моих подписках». Если для вашего тарифа доступны пакеты трафика, можно добавить объём до следующего сброса.",
+	trafficEnd: "📦 <b>Трафик на этот период закончился</b>\n\n🔗 {subscription_url}\n📊 Использовано: {used} из {limit}\n🔄 Следующий сброс: {reset}\n\nОткройте подписку в профиле, чтобы проверить условия тарифа и доступные пакеты трафика. Если сброс не предусмотрен или нужна помощь, обратитесь в поддержку.",
 
 	back: "⬅️ Назад", promo: "🎟 Промокоды", yesUnbind: "✅ Да, отвязать", cancel: "↩️ Отмена", subscriptions: "🔁 Подписки", openPage: "🌐 Открыть страницу подписки", support: "💬 Поддержка",
 	subTitle: "Подписка «%s»", devicesTitle: "Устройства", connectTitle: "Подключить устройство", switchTitle: "Какую подписку показать?",
@@ -112,13 +113,13 @@ var ru = words{
 }
 
 var en = words{
-	welcome:    "This is the {brand} bot.\n\nTo manage your subscription, open its page and tap “Open in Telegram”, or send the subscription link here.",
-	main:       "{brand}\n\nSecure, convenient internet access. Choose an action below.",
-	renew:      "To renew your subscription, message support: they will tell you how to pay.",
-	expiring:   "⏳ Subscription “{name}” ends {until}: {days} left.",
-	expired:    "⛔️ Subscription “{name}” has ended. Message support to renew it.",
-	traffic90:  "📦 90% of the traffic of “{name}” is used: {left} left.",
-	trafficEnd: "📦 The traffic of “{name}” for this period is used up. It renews {reset}.",
+	welcome:    "🌐 <b>{brand}</b>\n<i>Convenient internet access, managed in one place.</i>\n\n📱 <b>Connect your devices</b>\nAdd your subscription link to Happ, INCY or another compatible app. Traffic and device limits depend on your plan.\n\n👤 <b>Your account</b>\nYour profile shows purchase totals. My subscriptions contains expiration dates, connection links and device management.\n\n🛒 <b>Choose your next step</b>\nBuy opens new plans; Renew extends an existing subscription.\n\n👇 Choose an action below.",
+	main:       "🌐 <b>{brand}</b>\n<i>Convenient internet access, managed in one place.</i>\n\n📱 <b>Connect your devices</b>\nAdd your subscription link to Happ, INCY or another compatible app. Traffic and device limits depend on your plan.\n\n👤 <b>Your account</b>\nYour profile shows purchase totals. My subscriptions contains expiration dates, connection links and device management.\n\n🛒 <b>Choose your next step</b>\nBuy opens new plans; Renew extends an existing subscription.\n\n👇 Choose an action below.",
+	renew:      "💳 <b>Renew your subscription</b>\n\n🔗 {subscription_url}\n📅 Valid until: {until}\n\nChoose a duration and complete payment. Purchased days are added to your remaining time, and your connection link stays the same.\n\nExpired access resumes after payment confirmation. If plans are unavailable, contact support.",
+	expiring:   "⏳ <b>Your subscription expires soon</b>\n\n🔗 {subscription_url}\n📅 Expires: {until}\n🕒 Remaining: {days}\n\nOpen Renew in the main menu to keep your access uninterrupted. Purchased days are added to the remaining time; your connection link stays the same.",
+	expired:    "⛔️ <b>Your subscription has expired</b>\n\n🔗 {subscription_url}\n📅 Paid until: {until}\n\nAccess is paused. Open Renew, choose a duration and complete payment. Access resumes after confirmation, without adding the link to your app again.\n\nContact support if you need help.",
+	traffic90:  "📊 <b>Your traffic allowance is nearly used up</b>\n\n🔗 {subscription_url}\n90% of your allowance has been used.\n📦 Used: {used} of {limit}\n🟢 Remaining: {left}\n\nCheck your usage in My subscriptions. If traffic packages are available for your plan, you can add more data before the next reset.",
+	trafficEnd: "📦 <b>Your traffic allowance has been used up</b>\n\n🔗 {subscription_url}\n📊 Used: {used} of {limit}\n🔄 Next reset: {reset}\n\nOpen your subscription to review plan terms and available traffic packages. Contact support if your plan has no reset or you need help.",
 
 	back: "⬅️ Back", promo: "🎟 Promo codes", yesUnbind: "✅ Yes, unbind", cancel: "↩️ Cancel", subscriptions: "🔁 Subscriptions", openPage: "🌐 Open the subscription page", support: "💬 Support",
 	subTitle: "Subscription “%s”", devicesTitle: "Devices", connectTitle: "Connect a device", switchTitle: "Which subscription to show?",
@@ -195,7 +196,7 @@ func wordsFor(lang string) *words {
 // One pass over the text: a value that itself holds {something} is not filled again, and
 // the result does not depend on the order the variables are listed in.
 func render(text string, vars map[string]string) string {
-	rest := html.EscapeString(text)
+	rest := telegramTemplate(text)
 	var out strings.Builder
 	for {
 		i := strings.IndexByte(rest, '{')
@@ -217,6 +218,29 @@ func render(text string, vars map[string]string) string {
 	}
 	out.WriteString(rest)
 	return out.String()
+}
+
+var telegramTags = regexp.MustCompile(`&lt;(/?)(b|i|u|s|code)&gt;`)
+
+// Only balanced formatting from the template is enabled; substituted user data
+// remains escaped. Links with attributes and arbitrary HTML are never enabled.
+func telegramTemplate(text string) string {
+	escaped := html.EscapeString(text)
+	stack := []string{}
+	for _, tag := range telegramTags.FindAllStringSubmatch(escaped, -1) {
+		if tag[1] == "" {
+			stack = append(stack, tag[2])
+		} else {
+			if len(stack) == 0 || stack[len(stack)-1] != tag[2] {
+				return escaped
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if len(stack) != 0 {
+		return escaped
+	}
+	return telegramTags.ReplaceAllString(escaped, "<$1$2>")
 }
 
 func pick(admin, builtin string) string {
@@ -293,4 +317,45 @@ func (w *words) ago(t, now time.Time) string {
 func DefaultTexts(lang string) Texts {
 	w := wordsFor(lang)
 	return Texts{Welcome: w.welcome, Main: w.main, Renew: w.renew, Expiring: w.expiring, Expired: w.expired, Traffic90: w.traffic90, TrafficEnd: w.trafficEnd}
+}
+
+// Migrate only the former built-in wording; preserve administrator-written texts.
+func migrateDefaultTexts(texts *Texts, lang string) {
+	defaults := DefaultTexts(lang)
+	legacy := Texts{
+		Welcome:    "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
+		Main:       "{brand}\n\nБезопасное и удобное подключение к интернету. Выберите действие ниже.",
+		Renew:      "Продление подписки «{name}».\n\nВыберите срок и оплатите — оплаченные дни добавятся к оставшемуся сроку. Если тарифы сейчас недоступны, обратитесь в поддержку.",
+		Expiring:   "⏳ Подписка {subscription_url} заканчивается {until}: осталось {days}.",
+		Expired:    "⛔️ Подписка {subscription_url} закончилась. Чтобы продлить, напишите в поддержку.",
+		Traffic90:  "📦 Израсходовано 90% трафика подписки «{name}»: осталось {left}.",
+		TrafficEnd: "📦 Трафик подписки «{name}» на этот период закончился. Обновится {reset}.",
+	}
+	if lang == "en" {
+		legacy = Texts{
+			Welcome:    "This is the {brand} bot.\n\nTo manage your subscription, open its page and tap “Open in Telegram”, or send the subscription link here.",
+			Main:       "{brand}\n\nSecure, convenient internet access. Choose an action below.",
+			Renew:      "To renew your subscription, message support: they will tell you how to pay.",
+			Expiring:   "⏳ Subscription “{name}” ends {until}: {days} left.",
+			Expired:    "⛔️ Subscription “{name}” has ended. Message support to renew it.",
+			Traffic90:  "📦 90% of the traffic of “{name}” is used: {left} left.",
+			TrafficEnd: "📦 The traffic of “{name}” for this period is used up. It renews {reset}.",
+		}
+	}
+	for _, field := range []struct {
+		value        *string
+		old, current string
+	}{
+		{&texts.Welcome, legacy.Welcome, defaults.Welcome},
+		{&texts.Main, legacy.Main, defaults.Main},
+		{&texts.Renew, legacy.Renew, defaults.Renew},
+		{&texts.Expiring, legacy.Expiring, defaults.Expiring},
+		{&texts.Expired, legacy.Expired, defaults.Expired},
+		{&texts.Traffic90, legacy.Traffic90, defaults.Traffic90},
+		{&texts.TrafficEnd, legacy.TrafficEnd, defaults.TrafficEnd},
+	} {
+		if *field.value == field.old {
+			*field.value = field.current
+		}
+	}
 }

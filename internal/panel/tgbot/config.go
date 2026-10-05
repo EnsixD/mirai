@@ -90,7 +90,7 @@ func Default(lang string) Config {
 		Lang:        lang,
 		MenuVersion: 3,
 		Texts:       DefaultTexts(lang),
-		Admin:       AdminMenuConfig{Version: 1, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
+		Admin:       AdminMenuConfig{Version: 2, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
 		Buttons: []MenuButton{
 			{ID: "profile", Action: "profile", Label: l("👤 Профиль", "👤 Profile"), On: true},
 			{ID: "renew", Action: "renew", Label: l("💳 Продлить", "💳 Renew"), On: true},
@@ -176,6 +176,15 @@ func (c *Config) Validate() error {
 		}
 		c.Admin.Version = 1
 	}
+	// Issuing is a permission on the customer profile, not a main-menu button.
+	buttons := []AdminMenuButton{}
+	for _, button := range c.Admin.Buttons {
+		if button.Action != "grant" {
+			buttons = append(buttons, button)
+		}
+	}
+	c.Admin.Buttons = buttons
+	c.Admin.Version = 2
 	seenAdmin := map[string]bool{}
 	if len(c.Admin.Buttons) > 4 {
 		return ErrButtons
@@ -183,10 +192,9 @@ func (c *Config) Validate() error {
 	c.Admin.Users = false
 	c.Admin.Subscriptions = false
 	c.Admin.Search = false
-	c.Admin.Grant = false
 	for i := range c.Admin.Buttons {
 		button := &c.Admin.Buttons[i]
-		if !contains([]string{"users", "subscriptions", "search", "grant"}, button.Action) || seenAdmin[button.Action] {
+		if !contains([]string{"users", "subscriptions", "search"}, button.Action) || seenAdmin[button.Action] {
 			return ErrButtons
 		}
 		seenAdmin[button.Action] = true
@@ -202,8 +210,6 @@ func (c *Config) Validate() error {
 			c.Admin.Subscriptions = button.On
 		case "search":
 			c.Admin.Search = button.On
-		case "grant":
-			c.Admin.Grant = button.On
 		}
 	}
 	filtered := []MenuButton{}
@@ -369,6 +375,7 @@ func (c *Config) Validate() error {
 			return ErrText
 		}
 	}
+	migrateDefaultTexts(&c.Texts, c.Lang)
 	c.Texts.Expiring = strings.ReplaceAll(strings.ReplaceAll(c.Texts.Expiring, "«{name}»", "{subscription_url}"), "{name}", "{subscription_url}")
 	c.Texts.Expired = strings.ReplaceAll(strings.ReplaceAll(c.Texts.Expired, "«{name}»", "{subscription_url}"), "{name}", "{subscription_url}")
 	defaults := DefaultTexts(c.Lang)
@@ -411,5 +418,5 @@ func itoa(n int) string {
 }
 
 func defaultAdminButtons() []AdminMenuButton {
-	return []AdminMenuButton{{ID: "users", Action: "users", Label: "👥 Пользователи", On: true}, {ID: "subscriptions", Action: "subscriptions", Label: "📋 Все подписки", On: true}, {ID: "search", Action: "search", Label: "🔎 Поиск", On: true}, {ID: "grant", Action: "grant", Label: "🎁 Выдать подписку", On: true}}
+	return []AdminMenuButton{{ID: "users", Action: "users", Label: "👥 Пользователи", On: true}, {ID: "subscriptions", Action: "subscriptions", Label: "📋 Все подписки", On: true}, {ID: "search", Action: "search", Label: "🔎 Поиск", On: true}}
 }

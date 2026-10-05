@@ -102,17 +102,32 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			if err != nil {
 				return "Не удалось загрузить посетителей.", adminKB(adminBack())
 			}
+			accountIDs := map[int64]bool{}
 			for _, account := range accounts {
-				if account.UserID == 0 {
-					name := account.Name
-					if name == "" {
-						name = account.Username
-					}
-					if name == "" {
-						name = strconv.FormatInt(account.ID, 10)
-					}
-					users = append(users, db.User{ID: -account.ID, Name: name, Contact: account.Username, Status: "visitor"})
+				accountIDs[account.ID] = true
+			}
+			individual := []db.User{}
+			for _, user := range users {
+				link, err := q.TgLinkOfUser(ctx, user.ID)
+				if err != nil || !accountIDs[link.TgID] {
+					individual = append(individual, user)
 				}
+			}
+			users = individual
+			seenAccounts := map[int64]bool{}
+			for _, account := range accounts {
+				if seenAccounts[account.ID] {
+					continue
+				}
+				seenAccounts[account.ID] = true
+				name := account.Name
+				if name == "" {
+					name = strconv.FormatInt(account.ID, 10)
+				}
+				if account.Username != "" {
+					name += " · @" + account.Username
+				}
+				users = append(users, db.User{ID: -account.ID, Name: name, Status: "account"})
 			}
 		}
 		page, _ := strconv.Atoi(arg)
@@ -130,7 +145,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		for _, u := range users[min(page*10, len(users)):min(page*10+10, len(users))] {
 			label := fmt.Sprintf("#%d · %s · %s", u.ID, u.Name, adminState(domain.State(u, grants.Main(u.ID), b.d.Now())))
 			if u.ID < 0 {
-				label = u.Name + " · без подписки"
+				label = u.Name
 				rows = append(rows, []Button{adminButton(shortAdmin(label, 60), fmt.Sprintf("contact:%d", -u.ID))})
 			} else {
 				rows = append(rows, []Button{adminButton(shortAdmin(label, 60), fmt.Sprintf("user:%d", u.ID))})
@@ -151,7 +166,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		if cmd == "subs" {
 			title = "Все подписки"
 		}
-		return fmt.Sprintf("<b>%s: %d</b>\nСтраница %d/%d\nКаждая запись пользователя — отдельная подписка.", title, len(users), page+1, max(1, (len(users)+9)/10)), adminKB(rows...)
+		return fmt.Sprintf("<b>%s: %d</b>\nСтраница %d/%d", title, len(users), page+1, max(1, (len(users)+9)/10)), adminKB(rows...)
 	case "user":
 		u, err := q.GetUser(ctx, id)
 		if err != nil {
@@ -204,7 +219,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		if frozen {
 			freezeLabel, freezeAction = "▶ Разморозить", "unfreeze"
 		}
-		rows := [][]Button{{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id)), adminButton("📅 Продлить", fmt.Sprintf("extend:%d", id))}, {adminButton("🔗 Ссылка", fmt.Sprintf("link:%d", id)), adminButton("🎁 Выдать подписку", "grant")}, {adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))}}
+		rows := [][]Button{{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id)), adminButton("📅 Продлить", fmt.Sprintf("extend:%d", id))}, {adminButton("🔗 Ссылка", fmt.Sprintf("link:%d", id)), adminButton("👤 Профиль пользователя", fmt.Sprintf("owner:%d", id))}, {adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))}}
 		rows = append(rows, []Button{adminButton("← Все подписки", "subs:0")}, adminBack())
 		return text, adminKB(rows...)
 	case "link":
@@ -217,17 +232,31 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			return "Укажите публичный адрес панели, чтобы получить ссылку.", adminKB(adminBack())
 		}
 		return "<b>Ссылка подписки</b>\n<code>" + html.EscapeString(url) + "</code>\nХраните её как пароль.", adminKB([]Button{adminButton("← Подписка", fmt.Sprintf("user:%d", id))})
-	case "contact":
-		account, err := q.GetTgChat(ctx, id)
+	case "owner":
+		link, err := q.TgLinkOfUser(ctx, id)
 		if err != nil {
+			return "У этой подписки нет привязанного Telegram-аккаунта.", adminKB(adminBack())
+		}
+		return b.renderAdmin(ctx, chat, fmt.Sprintf("contact:%d", link.TgID))
+	case "contact":
+		if _, err := q.GetTgChat(ctx, id); err != nil {
 			return "Пользователь не найден.", adminKB(adminBack())
 		}
-		text := fmt.Sprintf("<b>%s</b>\n@%s\nTelegram ID: <code>%d</code>\nПодписки пока нет.", html.EscapeString(account.FirstName), html.EscapeString(account.Username), id)
+		subscriptions, err := q.ListTgLinksOf(ctx, id)
+		if err != nil {
+			return "Не удалось загрузить подписки.", adminKB(adminBack())
+		}
+		cfg := b.Config(ctx)
+		cfg.Lang = "ru"
+		text, _ := b.customerProfile(ctx, cfg, id, subscriptions)
 		rows := [][]Button{}
-		if b.Config(ctx).Admin.Grant {
+		for _, subscription := range subscriptions {
+			rows = append(rows, []Button{adminButton(shortAdmin(subscription.Name, 60), fmt.Sprintf("user:%d", subscription.ID))})
+		}
+		if cfg.Admin.Grant {
 			rows = append(rows, []Button{adminButton("🎁 Выдать подписку", fmt.Sprintf("grant:%d", id))})
 		}
-		return text, adminKB(append(rows, adminBack())...)
+		return text, adminKB(append(rows, []Button{adminButton("← Пользователи", "users:0")}, adminBack())...)
 	case "tariffs":
 		tariffs, err := q.ListTariffs(ctx)
 		if err != nil {
@@ -294,7 +323,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			if !button.On {
 				continue
 			}
-			target := map[string]string{"users": "users:0", "subscriptions": "subs:0", "search": "search", "grant": "grant"}[button.Action]
+			target := map[string]string{"users": "users:0", "subscriptions": "subs:0", "search": "search"}[button.Action]
 			if target == "" {
 				continue
 			}
@@ -345,8 +374,8 @@ func (b *Bot) adminPress(ctx context.Context, c *Client, out *Outbox, q *Callbac
 			b.setAdminFlow(chat, adminFlow{Kind: "tariff", TgID: id})
 			data = "a:tariffs:0"
 		} else {
-			b.setAdminFlow(chat, adminFlow{Kind: "recipient"})
-			data = "a:prompt"
+			data = "a:users:0"
+			notice = "Выберите пользователя и нажмите «Выдать подписку» в его профиле."
 		}
 	case "extend", "delete":
 		if _, err := b.d.Store.Q.GetUser(ctx, id); err != nil {
@@ -605,8 +634,8 @@ func (b *Bot) adminSectionAllowed(ctx context.Context, chat int64, data string) 
 	switch cmd {
 	case "users":
 		return cfg.Users
-	case "contact":
-		return cfg.Users || cfg.Search
+	case "contact", "owner":
+		return cfg.Users || cfg.Subscriptions || cfg.Search
 	case "subs":
 		return cfg.Subscriptions
 	case "search":

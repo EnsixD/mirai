@@ -96,8 +96,11 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			lines = append(lines, html.EscapeString(fmt.Sprintf(w.resets, r)))
 		}
 		lines = append(lines, "📱 "+html.EscapeString(vars["devices"]))
+		if url := b.subURL(ctx, u); url != "" {
+			lines = append(lines, "", "🔗 <b>Ссылка для подключения</b>", "<code>"+html.EscapeString(url)+"</code>", "", "Скопируйте ссылку и добавьте её в Happ, INCY или другое VPN-приложение. Храните её как пароль.")
+		}
 		rows := [][]Button{{{Text: fmt.Sprintf("📱 %s (%d)", w.devicesTitle, func() int64 { n, _ := b.d.Store.Q.CountBoundDevices(ctx, u.ID); return n }()), CallbackData: "d"}}}
-		back = []Button{{Text: w.back, CallbackData: "pf"}}
+		back = []Button{{Text: "← Мои подписки", CallbackData: "w"}}
 		return withNotice(strings.Join(lines, "\n")), &Keyboard{append(rows, back)}
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
@@ -114,6 +117,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	case "r":
 		if offers, _ := b.offers(ctx); len(offers) > 0 {
 			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, u.Name), "t", notice, nil)
+			text = render(pick(cfg.Texts.Renew, w.renew), vars) + "\n\n" + text
 			if sup := b.supportURL(ctx); sup != "" {
 				kb.InlineKeyboard = append(kb.InlineKeyboard, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
 			}
@@ -138,7 +142,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			page = 0
 		}
 		rows := [][]Button{}
-		lines := []string{"<b>📋 Мои подписки</b>"}
+		lines := []string{"<b>📋 Мои подписки</b>", "", "Выберите подписку, чтобы посмотреть срок, трафик, ссылку для подключения и устройства."}
 		end := min((page+1)*8, len(list))
 		for _, subscription := range list[page*8 : end] {
 			rows = append(rows, []Button{{Text: "📋 " + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})

@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
     'notes': {
-        'ru': 'Исправление нативных обновлений: проверка здоровья принимает публичную страницу сайта. Откат PostgreSQL выполняется атомарно, включая новые таблицы; службы запускаются даже при ошибке восстановления.',
-        'en': 'Native update recovery: health checks accept the public cover website. PostgreSQL rollback is atomic and handles newly migrated tables; services restart even if recovery fails.',
+        'ru': 'Профиль пользователя и выдача подписки в админ-боте, расширенные тексты и ссылки подключения. Модальное окно и удаление подписки с сохранением Telegram-профиля. Исправлены счётчики посетителей и зарегистрированных устройств, пояснения адреса и порта подписки.',
+        'en': 'Customer profiles and contextual subscription grants in the admin bot, richer messages and visible connection links. Subscription modal and deletion preserving the Telegram profile. Correct visitor and registered-device counts, clarified subscription address and port settings.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

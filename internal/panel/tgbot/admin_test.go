@@ -144,12 +144,7 @@ func TestAdminGrantAndExpiry(t *testing.T) {
 	e := adminEnv(t)
 	e.say(555, "/start")
 	e.tg.wait(t, 0, "sendMessage")
-	adminTap(e, "a:grant")
-	c := adminSay(e, "777")
-	if !strings.Contains(text(c), "ещё не написал") {
-		t.Fatal(text(c))
-	}
-	adminSay(e, "555")
+	adminTap(e, "a:grant:555")
 	tariffs, _ := e.st.Q.ListTariffs(e.ctx)
 	adminTap(e, fmt.Sprintf("a:tariff:%d", tariffs[1].ID))
 	adminSay(e, "Подарок <test>")
