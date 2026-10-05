@@ -23,6 +23,7 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 	}
 	calls := []string{}
 	next := int64(100)
+	failPhoto := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		calls = append(calls, method)
@@ -35,6 +36,22 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 				t.Error(err)
 			} else {
 				file.Close()
+			}
+		}
+
+		if !strings.Contains(r.Header.Get("Content-Type"), "multipart") {
+			var payload map[string]json.RawMessage
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if method == "sendPhoto" || method == "editMessageMedia" {
+				if v, ok := payload["reply_markup"]; ok && string(v) == "null" {
+					t.Error("nil reply_markup must be omitted")
+					fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"Bad Request: object expected as reply markup"}`)
+					return
+				}
+				if failPhoto {
+					fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"invalid photo"}`)
+					return
+				}
 			}
 		}
 		next++
@@ -110,6 +127,19 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 	if photos != 2 {
 		t.Fatal("banner was resent on navigation", photos)
 	} // upload + initial header
+
+	// Replacing a bad banner cannot prevent the existing menu from being edited.
+	failPhoto = true
+	if err := settings.Set(e.ctx, e.set, KeyBanner, "bad-photo"); err != nil {
+		t.Fatal(err)
+	}
+	fallbackID, err := restarted.editScreen(e.ctx, client, &short, "Still works", keyboard)
+	if err != nil || fallbackID != short.MessageID {
+		t.Fatal("banner failure blocked navigation", err)
+	}
+	if _, err := restarted.sendScreen(e.ctx, client, 555, "Start still works", keyboard); err != nil {
+		t.Fatal("banner failure blocked start", err)
+	}
 	if len(calls) < 5 {
 		t.Fatal("banner transitions not exercised")
 	}

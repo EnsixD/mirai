@@ -72,12 +72,20 @@ func (b *Bot) UploadBanner(ctx context.Context, data string) (string, error) {
 
 func (c *Client) SendPhoto(ctx context.Context, chat int64, photo, text string, kb *Keyboard) (Message, error) {
 	var m Message
-	err := c.call(ctx, "sendPhoto", map[string]any{"chat_id": chat, "photo": photo, "caption": text, "parse_mode": "HTML", "reply_markup": kb}, &m)
+	in := map[string]any{"chat_id": chat, "photo": photo, "caption": text, "parse_mode": "HTML"}
+	if kb != nil {
+		in["reply_markup"] = kb
+	}
+	err := c.call(ctx, "sendPhoto", in, &m)
 	return m, err
 }
 
 func (c *Client) EditPhoto(ctx context.Context, chat, msg int64, photo, text string, kb *Keyboard) error {
-	err := c.call(ctx, "editMessageMedia", map[string]any{"chat_id": chat, "message_id": msg, "media": map[string]any{"type": "photo", "media": photo, "caption": text, "parse_mode": "HTML"}, "reply_markup": kb}, nil)
+	in := map[string]any{"chat_id": chat, "message_id": msg, "media": map[string]any{"type": "photo", "media": photo, "caption": text, "parse_mode": "HTML"}}
+	if kb != nil {
+		in["reply_markup"] = kb
+	}
+	err := c.call(ctx, "editMessageMedia", in, nil)
 	var ae *APIError
 	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
 		return nil
@@ -130,7 +138,7 @@ func (b *Bot) sendScreen(ctx context.Context, c *Client, chat int64, text string
 	}
 	added, err := b.ensureBanner(ctx, c, chat, photo)
 	if err != nil {
-		return Message{}, err
+		return c.Send(ctx, chat, text, kb, false)
 	}
 	if current, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && current.MenuMsgID != 0 {
 		if !added {
@@ -165,7 +173,7 @@ func (b *Bot) editScreen(ctx context.Context, c *Client, m *Message, text string
 	} else {
 		added, err := b.ensureBanner(ctx, c, chat, photo)
 		if err != nil {
-			return m.MessageID, err
+			return m.MessageID, c.Edit(ctx, chat, m.MessageID, text, kb)
 		}
 		if added {
 			// First enable on an existing menu: recreate once to put the banner above it.
