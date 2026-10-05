@@ -266,7 +266,6 @@
             "enum": [
               "users",
               "subscriptions",
-              "search",
               "grant",
               "orders",
               "broadcast",

@@ -1350,7 +1350,7 @@ export interface components {
         };
         AdminMenuButton: {
             /** @enum {string} */
-            action: "users" | "subscriptions" | "search" | "grant" | "orders" | "broadcast" | "maintenance" | "refresh";
+            action: "users" | "subscriptions" | "grant" | "orders" | "broadcast" | "maintenance" | "refresh";
             id: string;
             label: string;
             on: boolean;

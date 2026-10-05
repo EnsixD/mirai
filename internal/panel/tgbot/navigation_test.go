@@ -14,6 +14,28 @@ func TestLocalBotStructureAndOwnership(t *testing.T) {
 	e := adminEnv(t)
 	e.say(555, "/start")
 	e.tg.wait(t, 0, "sendMessage")
+	stats, err := e.st.Q.AdminTelegramStats(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, home := e.bot.renderAdmin(e.ctx, 900, "home")
+	counts := map[string]int64{"a:users:0": stats.Accounts, "a:subs:0": stats.Keys, "a:orders:0": stats.Pending}
+	for _, row := range home.InlineKeyboard {
+		for _, button := range row {
+			if count, ok := counts[button.CallbackData]; ok {
+				if !strings.HasSuffix(button.Text, fmt.Sprintf("(%d)", count)) {
+					t.Fatal("missing button count", button.Text)
+				}
+				delete(counts, button.CallbackData)
+			}
+			if button.CallbackData == "a:search" {
+				t.Fatal("removed search button returned")
+			}
+		}
+	}
+	if len(counts) != 0 {
+		t.Fatal("counted admin buttons missing")
+	}
 	if err := e.st.Q.LinkTg(e.ctx, db.LinkTgParams{UserID: e.user.ID, TgID: 555, CreatedAt: e.clock().Unix()}); err != nil {
 		t.Fatal(err)
 	}

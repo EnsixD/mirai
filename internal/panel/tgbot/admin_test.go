@@ -126,9 +126,8 @@ func TestAdminSubscriptionLifecycle(t *testing.T) {
 	if u.ExpiresAt.Int64 != before+17*86400 {
 		t.Fatal("duplicate callback extended twice")
 	}
-	adminTap(e, "a:search")
-	if c := adminSay(e, "Анна"); !strings.Contains(text(c), "Найдено: 1") {
-		t.Fatal(text(c))
+	if e.bot.adminSectionAllowed(e.ctx, 900, "search") {
+		t.Fatal("removed search remains accessible")
 	}
 	adminTap(e, fmt.Sprintf("a:delete:%d", id))
 	if _, err := e.st.Q.GetUser(e.ctx, id); err != nil {

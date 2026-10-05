@@ -38,13 +38,13 @@ func TestAdminButtonsPreserveRowsAndDeletion(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Admin.Buttons) != 2 || cfg.Admin.Buttons[0].Action != "search" || !cfg.Admin.Buttons[1].Row || cfg.Admin.Subscriptions || !cfg.Admin.Search {
+	if len(cfg.Admin.Buttons) != 1 || cfg.Admin.Buttons[0].Action != "users" || !cfg.Admin.Buttons[0].Row || cfg.Admin.Subscriptions || cfg.Admin.Search {
 		t.Fatal("order, row or deletion lost")
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Admin.Buttons) != 2 {
+	if len(cfg.Admin.Buttons) != 1 {
 		t.Fatal("deleted buttons returned")
 	}
 	cfg.Admin.Buttons = append(cfg.Admin.Buttons, cfg.Admin.Buttons[0])

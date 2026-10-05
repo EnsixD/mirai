@@ -11,7 +11,7 @@ import (
 // notifications go out. It is stored as one JSON setting.
 type AdminMenuButton struct {
 	ID     string `json:"id"`
-	Action string `json:"action" enum:"users,subscriptions,search,grant,orders,broadcast,maintenance,refresh"`
+	Action string `json:"action" enum:"users,subscriptions,grant,orders,broadcast,maintenance,refresh"`
 	Label  string `json:"label" maxLength:"40"`
 	On     bool   `json:"on"`
 	Row    bool   `json:"row"`
@@ -90,7 +90,7 @@ func Default(lang string) Config {
 		Lang:        lang,
 		MenuVersion: 4,
 		Texts:       DefaultTexts(lang),
-		Admin:       AdminMenuConfig{Version: 3, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
+		Admin:       AdminMenuConfig{Version: 3, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: false, Grant: true, Statistics: true},
 		Buttons: []MenuButton{
 			{ID: "buy", Action: "buy", Label: l("🛒 Купить", "🛒 Buy"), On: true},
 			{ID: "renew", Action: "renew", Label: l("🔄 Продлить", "🔄 Renew"), On: true},
@@ -186,7 +186,7 @@ func (c *Config) Validate() error {
 	// Issuing is a permission on the customer profile, not a main-menu button.
 	buttons := []AdminMenuButton{}
 	for _, button := range c.Admin.Buttons {
-		if button.Action != "grant" {
+		if button.Action != "grant" && button.Action != "search" {
 			buttons = append(buttons, button)
 		}
 	}
@@ -232,7 +232,7 @@ func (c *Config) Validate() error {
 	c.Admin.Search = false
 	for i := range c.Admin.Buttons {
 		button := &c.Admin.Buttons[i]
-		if !contains([]string{"users", "subscriptions", "search", "orders", "broadcast", "maintenance", "refresh"}, button.Action) || seenAdmin[button.Action] {
+		if !contains([]string{"users", "subscriptions", "orders", "broadcast", "maintenance", "refresh"}, button.Action) || seenAdmin[button.Action] {
 			return ErrButtons
 		}
 		seenAdmin[button.Action] = true
