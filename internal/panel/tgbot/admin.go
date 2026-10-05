@@ -39,7 +39,7 @@ func (b *Bot) addAdminButton(ctx context.Context, chat int64, kb *Keyboard) {
 	}
 }
 
-func adminKB(rows ...[]Button) *Keyboard   { return &Keyboard{InlineKeyboard: rows} }
+func adminKB(rows ...[]Button) *Keyboard   { return &Keyboard{InlineKeyboard: rows, KeepRows: true} }
 func adminButton(text, data string) Button { return Button{Text: text, CallbackData: "a:" + data} }
 func adminBack() []Button                  { return []Button{adminButton("← Админ", "home")} }
 func (b *Bot) setAdminFlow(chat int64, f adminFlow) {
@@ -235,12 +235,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id))},
 			{adminButton(fmt.Sprintf("📱 Устройства (%d)", devices), fmt.Sprintf("devices:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))},
 		}
-		if link, err := q.TgLinkOfUser(ctx, id); err == nil {
-			rows = append(rows, []Button{adminButton("← Подписки пользователя", fmt.Sprintf("owned:%d", link.TgID))})
-		} else {
-			rows = append(rows, []Button{adminButton("← Все подписки", "subs:0")})
-		}
-		rows = append(rows, adminBack())
+		rows = append(rows, []Button{adminButton("← Все подписки", "subs:0")})
 		return text, adminKB(rows...)
 	case "link":
 		u, err := q.GetUser(ctx, id)

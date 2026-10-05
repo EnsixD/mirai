@@ -50,7 +50,6 @@ func (b *Bot) adminNavigationScreen(ctx context.Context, chat int64, data string
 				}
 			}
 		}
-		kb.InlineKeyboard = append(kb.InlineKeyboard, adminBack())
 		return text, kb, true
 	case "prompt":
 		f, ok := b.adminFlow(chat, false)

@@ -116,6 +116,10 @@ func (c *Client) EditCaption(ctx context.Context, chat, msg int64, text string, 
 }
 
 func (b *Bot) sendScreen(ctx context.Context, c *Client, chat int64, text string, kb *Keyboard) (Message, error) {
+	if photo, _ := b.d.Settings.String(ctx, KeyBanner); photo == "" {
+		b.clearBannerHeader(ctx, c, chat)
+		return c.Send(ctx, chat, text, kb, false)
+	}
 	if current, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && current.MenuMsgID != 0 {
 		id, err := b.editScreen(ctx, c, &Message{MessageID: current.MenuMsgID, Chat: Chat{ID: chat}}, text, kb)
 		if err == nil {

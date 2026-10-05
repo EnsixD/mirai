@@ -50,7 +50,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			text = "🔄 <b>Продление</b>\n\nУ вас пока нет подписок — продлевать нечего."
 			rows = [][]Button{{{Text: "🛒 Купить", CallbackData: "b"}, {Text: "← Меню", CallbackData: "m"}}}
 		}
-		return text, &Keyboard{InlineKeyboard: rows}
+		return text, &Keyboard{KeepRows: true, InlineKeyboard: rows}
 	}
 	if cmd == "b" {
 		text, kb := b.shopList(ctx, w, w.buyTitle, "tn", notice, []Button{{Text: w.back, CallbackData: "m"}})
@@ -92,7 +92,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		return text, kb
 	}
 	if !ok && cmd == "w" {
-		return "📋 Мои подписки\n\nУ вас пока нет подписок.", &Keyboard{InlineKeyboard: [][]Button{{{Text: w.back, CallbackData: "pf"}}}}
+		return "📋 Мои подписки\n\nУ вас пока нет подписок.", &Keyboard{KeepRows: true, InlineKeyboard: [][]Button{{{Text: w.back, CallbackData: "pf"}}}}
 	}
 	if !ok {
 		return b.welcome(ctx, cfg, w, chat, notice)
@@ -127,7 +127,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		}
 		rows := [][]Button{{{Text: fmt.Sprintf("📱 %s (%d)", w.devicesTitle, func() int64 { n, _ := b.d.Store.Q.CountBoundDevices(ctx, u.ID); return n }()), CallbackData: "d"}}}
 		back = []Button{{Text: "← Мои подписки", CallbackData: "w"}}
-		return withNotice(strings.Join(lines, "\n")), &Keyboard{InlineKeyboard: append(rows, back)}
+		return withNotice(strings.Join(lines, "\n")), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 	case "x", "xk", "xp":
 		return b.trafficShop(ctx, w, chat, u, cmd, arg, notice)
 	case "d", "dc", "da":
@@ -139,7 +139,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if btn, ok := b.pageButton(ctx, cfg, w, w.openPage); ok {
 			rows = append(rows, []Button{btn})
 		}
-		return withNotice(text), &Keyboard{InlineKeyboard: append(rows, back)}
+		return withNotice(text), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 	case "rr":
 		if offers, _ := b.offers(ctx); len(offers) > 0 {
 			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, u.Name), "t", notice, nil)
@@ -154,11 +154,11 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if sup := b.supportURL(ctx); sup != "" {
 			rows = append(rows, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
 		}
-		return withNotice(render(pick(cfg.Texts.Renew, w.renew), vars)), &Keyboard{InlineKeyboard: append(rows, back)}
+		return withNotice(render(pick(cfg.Texts.Renew, w.renew), vars)), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 	case "p":
 		for _, btn := range cfg.Buttons {
 			if btn.Action == "page" && btn.ID == arg {
-				return withNotice(render(btn.Text, vars)), &Keyboard{InlineKeyboard: [][]Button{back}}
+				return withNotice(render(btn.Text, vars)), &Keyboard{KeepRows: true, InlineKeyboard: [][]Button{back}}
 			}
 		}
 	case "w":
@@ -183,7 +183,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
-		return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, []Button{{Text: w.back, CallbackData: "pf"}})}
+		return strings.Join(lines, "\n"), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, []Button{{Text: w.back, CallbackData: "pf"}})}
 	}
 	kb := b.menu(ctx, cfg, w, len(list))
 	b.addAdminButton(ctx, chat, kb)
@@ -211,13 +211,13 @@ func (b *Bot) welcome(ctx context.Context, cfg Config, w *words, chat int64, not
 	if sup := b.supportURL(ctx); sup != "" {
 		rows = append(rows, []Button{{Text: labelOf(cfg, "support", w.support), URL: sup}})
 	}
-	kb := &Keyboard{InlineKeyboard: rows}
+	kb := &Keyboard{KeepRows: true, InlineKeyboard: rows}
 	b.addAdminButton(ctx, chat, kb)
 	rows = kb.InlineKeyboard
 	if rows == nil {
 		return text, nil
 	}
-	return text, &Keyboard{InlineKeyboard: rows}
+	return text, &Keyboard{KeepRows: true, InlineKeyboard: rows}
 }
 
 // menu is the admin's main menu as buttons.
@@ -265,7 +265,7 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 			rows = append(rows, []Button{btn})
 		}
 	}
-	return &Keyboard{InlineKeyboard: rows}
+	return &Keyboard{KeepRows: true, InlineKeyboard: rows}
 }
 
 // pageButton opens the subscription page: in the Mini App when Telegram can load it,
@@ -286,7 +286,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		if u.DeviceLimit.Valid {
 			limit = strconv.FormatInt(u.DeviceLimit.Int64, 10)
 		}
-		return head + "\n\n" + html.EscapeString(fmt.Sprintf(w.devicesOff, limit)), &Keyboard{InlineKeyboard: [][]Button{back}}
+		return head + "\n\n" + html.EscapeString(fmt.Sprintf(w.devicesOff, limit)), &Keyboard{KeepRows: true, InlineKeyboard: [][]Button{back}}
 	}
 	devs, err := b.d.Store.Q.ListBoundDevices(ctx, u.ID)
 	if err != nil {
@@ -296,12 +296,12 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	policy, _ := domain.ResetPolicy(ctx, b.d.Store.Q)
 	admin := b.isAdmin(ctx, chat, chat)
 	if cmd == "da" {
-		return "Очистить все устройства этой подписки?", &Keyboard{InlineKeyboard: [][]Button{{{Text: "Очистить все", CallbackData: "dua"}, {Text: w.cancel, CallbackData: "d"}}}}
+		return "Очистить все устройства этой подписки?", &Keyboard{KeepRows: true, InlineKeyboard: [][]Button{{{Text: "Очистить все", CallbackData: "dua"}, {Text: w.cancel, CallbackData: "d"}}}}
 	}
 	if cmd == "dc" {
 		for _, d := range devs {
 			if d.ID == id {
-				return html.EscapeString(fmt.Sprintf(w.confirmUnbind, name(d))), &Keyboard{InlineKeyboard: [][]Button{
+				return html.EscapeString(fmt.Sprintf(w.confirmUnbind, name(d))), &Keyboard{KeepRows: true, InlineKeyboard: [][]Button{
 					{{Text: w.yesUnbind, CallbackData: "du:" + strconv.FormatInt(id, 10)}, {Text: w.cancel, CallbackData: "d"}}}}
 			}
 		}
@@ -340,7 +340,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 			lines = append(lines, "", fmt.Sprintf("Лимит: %d очистки за %d дней. Очистка всех устройств считается одной операцией.", policy.Limit, policy.PeriodDays))
 		}
 	}
-	return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, back)}
+	return strings.Join(lines, "\n"), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 }
 
 func deviceName(w *words, d db.BoundDevice) string {
