@@ -242,11 +242,7 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 		case "renew":
 			btn = Button{Text: mb.Label, CallbackData: "r"}
 		case "support":
-			sup := b.supportURL(ctx)
-			if sup == "" {
-				continue
-			}
-			btn = Button{Text: mb.Label, URL: sup}
+			continue
 		case "app":
 			var ok bool
 			if btn, ok = b.pageButton(ctx, cfg, w, mb.Label); !ok {
@@ -259,7 +255,7 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 		default:
 			continue
 		}
-		if mb.Row && len(rows) > 0 && len(rows[len(rows)-1]) < 3 {
+		if len(rows) > 0 && len(rows[len(rows)-1]) < 2 {
 			rows[len(rows)-1] = append(rows[len(rows)-1], btn)
 		} else {
 			rows = append(rows, []Button{btn})
