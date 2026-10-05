@@ -475,9 +475,10 @@ func (b *Bot) adminPress(ctx context.Context, c *Client, out *Outbox, q *Callbac
 			break
 		}
 		disabled := cmd == "freeze"
-		_, err := b.d.Users.Update(ctx, id, domain.Patch{Disabled: &disabled})
+		updated, err := b.d.Users.Update(ctx, id, domain.Patch{Disabled: &disabled})
 		if err == nil {
 			b.adminAudit(ctx, chat, cmd, id, 0)
+			b.NotifySubscriptionChange(ctx, updated, 0, cmd, 0)
 		}
 		notice = adminResult(err, "Готово. Заморозка запрещает подключение, срок продолжает идти.")
 		data = fmt.Sprintf("a:user:%d", id)
@@ -513,15 +514,16 @@ func (b *Bot) adminPress(ctx context.Context, c *Client, out *Outbox, q *Callbac
 	}
 	out.Reply(chat, "admin-edit", 1, func(ctx context.Context, c *Client) error {
 		text, kb := b.adminScreen(ctx, chat, data, notice)
-		err := c.Edit(ctx, chat, q.Message.MessageID, text, kb)
+		edited, err := b.editScreen(ctx, c, q.Message, text, kb)
 		if err == nil {
+			_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: edited, TgID: chat})
 			return nil
 		}
 		var ae *APIError
 		if errors.As(err, &ae) && ae.Code == 429 {
 			return err
 		}
-		_, err = c.Send(ctx, chat, text, kb, false)
+		_, err = b.sendScreen(ctx, c, chat, text, kb)
 		return err
 	})
 }
@@ -595,10 +597,11 @@ func (b *Bot) adminMessage(ctx context.Context, out *Outbox, m *Message) bool {
 			if limit == 0 {
 				patch = domain.Patch{ClearDeviceLimit: true}
 			}
-			_, err = b.d.Users.Update(ctx, f.UserID, patch)
+			updated, err := b.d.Users.Update(ctx, f.UserID, patch)
 			if err == nil {
 				b.adminFlow(chat, true)
 				b.adminAudit(ctx, chat, "device-limit", f.UserID, limit)
+				b.NotifySubscriptionChange(ctx, updated, 0, "devices", 0)
 			}
 			data = fmt.Sprintf("a:user:%d", f.UserID)
 			notice = adminResult(err, "Лимит устройств сохранён.")
@@ -616,7 +619,7 @@ func (b *Bot) adminMessage(ctx context.Context, out *Outbox, m *Message) bool {
 	}
 	out.Reply(chat, "admin-reply", 1, func(ctx context.Context, c *Client) error {
 		text, kb := b.adminScreen(ctx, chat, data, notice)
-		_, err := c.Send(ctx, chat, text, kb, false)
+		_, err := b.sendScreen(ctx, c, chat, text, kb)
 		return err
 	})
 	return true
@@ -631,15 +634,19 @@ func (b *Bot) commitAdmin(ctx context.Context, out *Outbox, chat int64, f adminF
 	}
 	switch f.Kind {
 	case "delete":
+		previous, _ := b.d.Store.Q.GetUser(ctx, f.UserID)
+		owner, _ := b.d.Store.Q.GetTgLink(ctx, f.UserID)
 		err := b.d.Users.Delete(ctx, f.UserID)
 		if err == nil {
 			b.adminAudit(ctx, chat, "delete", f.UserID, 0)
+			b.NotifySubscriptionChange(ctx, previous, owner.TgID, "delete", 0)
 		}
 		return "a:subs:0", adminResult(err, "Подписка удалена.")
 	case "extend":
-		_, err := b.d.Users.Extend(ctx, f.UserID, f.Days)
+		updated, err := b.d.Users.Extend(ctx, f.UserID, f.Days)
 		if err == nil {
 			b.adminAudit(ctx, chat, "extend", f.UserID, f.Days)
+			b.NotifySubscriptionChange(ctx, updated, 0, "extend", f.Days)
 		}
 		return fmt.Sprintf("a:user:%d", f.UserID), adminResult(err, "Подписка продлена.")
 	case "create":
@@ -667,7 +674,7 @@ func (b *Bot) commitAdmin(ctx context.Context, out *Outbox, chat int64, f adminF
 		}
 		b.d.Users.Changed()
 		b.adminAudit(ctx, chat, "create", u.ID, f.Days)
-		b.freshMenu(out, f.TgID, "🎁 Администратор выдал вам новую подписку: "+f.Name)
+		b.NotifySubscriptionChange(ctx, u, f.TgID, "create", f.Days)
 		return fmt.Sprintf("a:user:%d", u.ID), "Подписка создана и привязана к пользователю."
 	}
 	return "a:home", "Действие недоступно."

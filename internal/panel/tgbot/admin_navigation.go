@@ -109,6 +109,12 @@ func (b *Bot) adminNavigationAction(ctx context.Context, chat int64, cmd, arg st
 		if err == nil {
 			b.d.Users.Changed()
 			b.adminAudit(ctx, chat, "account-ban", id, 0)
+			banned, _ := b.d.Store.Q.AccountBanned(ctx, id)
+			notice := "✅ <b>Доступ восстановлен</b>\n\nАдминистратор разблокировал ваш аккаунт. Откройте профиль, чтобы посмотреть свои подписки."
+			if banned {
+				notice = "🚫 <b>Аккаунт заблокирован</b>\n\nАдминистратор ограничил доступ к боту и вашим подпискам. Если это ошибка, обратитесь в поддержку."
+			}
+			b.NotifyAdminNotice(ctx, id, notice)
 		}
 		return fmt.Sprintf("a:contact:%d", id), adminResult(err, "Доступ пользователя изменён."), true
 	case "account-delete", "trial-reset":
@@ -168,6 +174,7 @@ func (b *Bot) commitAdminNavigation(ctx context.Context, chat int64, f adminFlow
 		err := b.d.Store.Q.ResetAccountTrial(ctx, f.TgID)
 		if err == nil {
 			b.adminAudit(ctx, chat, f.Kind, f.TgID, 0)
+			b.NotifyAdminNotice(ctx, f.TgID, "🎁 <b>Пробный период снова доступен</b>\n\nАдминистратор разрешил повторно попробовать сервис. Откройте «Купить», чтобы выбрать пробную подписку.")
 		}
 		return fmt.Sprintf("a:contact:%d", f.TgID), adminResult(err, "Пробная подписка снова доступна."), true
 	case "maintenance":

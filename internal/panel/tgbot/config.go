@@ -65,11 +65,12 @@ type Texts struct {
 }
 
 type Notify struct {
-	Expire3d   bool `json:"expire_3d"`
-	Expire1d   bool `json:"expire_1d"`
-	Expired    bool `json:"expired"`
-	Traffic90  bool `json:"traffic_90"`
-	Traffic100 bool `json:"traffic_100"`
+	AdminChanges bool `json:"admin_changes" doc:"Уведомлять о выдаче и изменениях подписки администратором"`
+	Expire3d     bool `json:"expire_3d"`
+	Expire1d     bool `json:"expire_1d"`
+	Expired      bool `json:"expired"`
+	Traffic90    bool `json:"traffic_90"`
+	Traffic100   bool `json:"traffic_100"`
 }
 
 // Built-in actions, each at most once in the menu.
@@ -98,7 +99,7 @@ func Default(lang string) Config {
 			{ID: "help", Action: "help", Label: l("📖 Инструкция", "📖 Instructions"), On: true},
 			{ID: "support", Action: "support", Label: l("💬 Поддержка", "💬 Support"), On: true},
 		},
-		Notify:     Notify{Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
+		Notify:     Notify{AdminChanges: true, Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
 		MiniApp:    true,
 		CleanChat:  true,
 		QuietNight: true,

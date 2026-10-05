@@ -433,6 +433,9 @@ func (h *handlers) createUser(ctx context.Context, in *createUserInput) (*userOu
 		return nil, huma.Error422UnprocessableEntity("tariff_not_found", &huma.ErrorDetail{Location: "body.tariff_id", Message: "tariff_not_found"})
 	}
 	if err == nil {
+		if h.d.Telegram != nil {
+			h.d.Telegram.NotifySubscriptionChange(ctx, u, in.Body.TelegramID, "create", 0)
+		}
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.create", "user", strconv.FormatInt(u.ID, 10), map[string]any{"tariff_id": in.Body.TariffID})
 	}
 	return h.userResult(ctx, u, err)
@@ -466,14 +469,34 @@ func (h *handlers) updateUser(ctx context.Context, in *patchUserInput) (*userOut
 	}
 	u, err := h.d.Users.Update(ctx, in.ID, p)
 	if err == nil {
+		if h.d.Telegram != nil {
+			if b.Disabled != nil {
+				action := "unfreeze"
+				if *b.Disabled {
+					action = "freeze"
+				}
+				h.d.Telegram.NotifySubscriptionChange(ctx, u, 0, action, 0)
+			}
+			if b.ExpiresAt != nil || b.NeverExpires {
+				h.d.Telegram.NotifySubscriptionChange(ctx, u, 0, "extend", 0)
+			}
+			if b.DeviceLimit != nil || b.DevicesUnlimited {
+				h.d.Telegram.NotifySubscriptionChange(ctx, u, 0, "devices", 0)
+			}
+		}
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.update", "user", strconv.FormatInt(in.ID, 10), nil)
 	}
 	return h.userResult(ctx, u, err)
 }
 
 func (h *handlers) deleteUser(ctx context.Context, in *userIDInput) (*struct{}, error) {
+	previous, _ := h.d.Store.Q.GetUser(ctx, in.ID)
+	owner, _ := h.d.Store.Q.GetTgLink(ctx, in.ID)
 	if err := h.d.Users.Delete(ctx, in.ID); err != nil {
 		return nil, mapDomainErr(err)
+	}
+	if h.d.Telegram != nil {
+		h.d.Telegram.NotifySubscriptionChange(ctx, previous, owner.TgID, "delete", 0)
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "user.delete", "user", strconv.FormatInt(in.ID, 10), nil)
 	return nil, nil
@@ -492,6 +515,9 @@ func (h *handlers) extendUser(ctx context.Context, in *extendInput) (*userOutput
 		u, err = h.d.Users.Extend(ctx, in.ID, b.Days)
 	}
 	if err == nil {
+		if h.d.Telegram != nil {
+			h.d.Telegram.NotifySubscriptionChange(ctx, u, 0, "extend", b.Days)
+		}
 		h.audit(ctx, sessionOf(ctx).AdminID, "user.extend", "user", strconv.FormatInt(in.ID, 10), map[string]any{"days": b.Days, "months": b.Months})
 	}
 	return h.userResult(ctx, u, err)
@@ -574,6 +600,30 @@ func (h *handlers) reissueUser(ctx context.Context, in *userIDInput) (*userOutpu
 }
 
 func (h *handlers) bulkUsers(ctx context.Context, in *bulkInput) (*bulkOutput, error) {
+	type noticeSnapshot struct {
+		user db.User
+		chat int64
+	}
+	notices := map[int64]noticeSnapshot{}
+	if h.d.Telegram != nil && in.Body.Action != "reset" {
+		for _, id := range in.Body.IDs {
+			if id <= 0 {
+				continue
+			}
+			if _, seen := notices[id]; seen {
+				continue
+			}
+			u, err := h.d.Store.Q.GetUser(ctx, id)
+			if err != nil {
+				continue
+			}
+			owner, err := h.d.Store.Q.GetTgLink(ctx, id)
+			if err != nil {
+				continue
+			}
+			notices[id] = noticeSnapshot{u, owner.TgID}
+		}
+	}
 	// One transaction for the list: it is applied whole or not at all.
 	n, err := h.d.Users.Bulk(ctx, in.Body.IDs, in.Body.Action, in.Body.Days)
 	if err != nil {
@@ -581,6 +631,35 @@ func (h *handlers) bulkUsers(ctx context.Context, in *bulkInput) (*bulkOutput, e
 	}
 	out := &bulkOutput{}
 	out.Body.Affected = n
+	if n > 0 && h.d.Telegram != nil {
+		for id, snapshot := range notices {
+			u := snapshot.user
+			action := in.Body.Action
+			days := in.Body.Days
+			if action != "delete" {
+				var err error
+				u, err = h.d.Store.Q.GetUser(ctx, id)
+				if err != nil {
+					continue
+				}
+			}
+			switch action {
+			case "disable":
+				action = "freeze"
+			case "enable":
+				action = "unfreeze"
+			case "extend":
+				if days == 0 && u.ExpiresAt.Valid {
+					before := h.d.Now().Unix()
+					if snapshot.user.ExpiresAt.Valid && snapshot.user.ExpiresAt.Int64 > before {
+						before = snapshot.user.ExpiresAt.Int64
+					}
+					days = (u.ExpiresAt.Int64 - before) / 86400
+				}
+			}
+			h.d.Telegram.NotifySubscriptionChange(ctx, u, snapshot.chat, action, days)
+		}
+	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "user.bulk_"+in.Body.Action, "user", "", map[string]any{"count": n, "requested": len(in.Body.IDs)})
 	return out, nil
 }
