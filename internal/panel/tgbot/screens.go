@@ -311,7 +311,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		lines = append(lines, html.EscapeString(w.devicesNone))
 	}
 	traffic, _ := b.d.Store.Q.DeviceTrafficOf(ctx, u.ID)
-	for i, d := range devs {
+	for _, d := range devs {
 		meta := []string{}
 		if d.Hwid != "" && d.Model != "" && d.Os != "" {
 			meta = append(meta, strings.TrimSpace(d.Os+" "+d.OsVersion))
@@ -323,9 +323,9 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		if count, ok := traffic[d.ID]; ok {
 			meta = append(meta, fmt.Sprintf("↑ %.2f GB · ↓ %.2f GB", float64(count.Up)/(1<<30), float64(count.Down)/(1<<30)))
 		}
-		lines = append(lines, fmt.Sprintf("%d. %s — %s", i+1, html.EscapeString(name(d)), html.EscapeString(strings.Join(meta, " · "))))
+		lines = append(lines, "• "+html.EscapeString(name(d))+" · "+html.EscapeString(strings.Join(meta[:len(meta)-1], " · "))+"\n"+html.EscapeString(meta[len(meta)-1]))
 		if policy.Single || admin {
-			rows = append(rows, []Button{{Text: "📱 " + name(d), CallbackData: "du:" + strconv.FormatInt(d.ID, 10)}})
+			rows = append(rows, []Button{{Text: "🗑 " + deviceLabel(w, d), CallbackData: "du:" + strconv.FormatInt(d.ID, 10)}})
 		}
 	}
 	if len(devs) > 0 {
@@ -337,6 +337,18 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 		}
 	}
 	return strings.Join(lines, "\n"), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
+}
+
+func deviceLabel(w *words, d db.BoundDevice) string {
+	parts := []string{deviceName(w, d)}
+	if d.Model != "" && d.Os != "" {
+		parts = append(parts, strings.TrimSpace(d.Os+" "+d.OsVersion))
+	}
+	if app, _, _ := strings.Cut(strings.TrimSpace(d.App), " "); app != "" {
+		app, _, _ = strings.Cut(app, "/")
+		parts = append(parts, app)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func deviceName(w *words, d db.BoundDevice) string {

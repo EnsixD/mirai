@@ -89,7 +89,7 @@ func (q *Queries) DeleteBoundDevicesOf(ctx context.Context, userID int64) error 
 }
 
 const getBoundDevice = `-- name: GetBoundDevice :one
-SELECT id, user_id, hwid, slot_id, os, os_version, model, app, last_ip, created_at, last_seen FROM bound_devices WHERE user_id = $1 AND hwid = $2
+SELECT id, user_id, hwid, slot_id, os, os_version, model, app, last_ip, created_at, last_seen FROM bound_devices WHERE user_id = $1 AND (hwid = $2 OR hwid = 'legacy-sha256:' || encode(sha256(convert_to($2::text, 'UTF8')), 'hex'))
 `
 
 type GetBoundDeviceParams struct {

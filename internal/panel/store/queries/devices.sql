@@ -1,5 +1,5 @@
 -- name: GetBoundDevice :one
-SELECT * FROM bound_devices WHERE user_id = $1 AND hwid = $2;
+SELECT * FROM bound_devices WHERE user_id = $1 AND (hwid = $2 OR hwid = 'legacy-sha256:' || encode(sha256(convert_to($2::text, 'UTF8')), 'hex'));
 
 -- name: GetBoundDeviceByID :one
 SELECT * FROM bound_devices WHERE id = $1 AND user_id = $2;

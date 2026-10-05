@@ -106,7 +106,7 @@ func (b *Bot) shopList(ctx context.Context, w *words, title, prefix, notice stri
 	if len(offers) == 0 {
 		lines = append(lines, html.EscapeString(w.payUnavailable))
 	}
-	return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, back)}
+	return strings.Join(lines, "\n"), &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 }
 
 // cheapest is the price a list shows: rubles when sold for them, else Stars; "from" the
@@ -172,7 +172,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 				label := billing.TermLabel(o.Tariff, t.Days, lang) + " · " + w.cheapest(billing.Offer{Stars: t.Stars, Rub: t.Rub})
 				rows = append(rows, []Button{{Text: label, CallbackData: prefix + ":" + ref + "." + strconv.FormatInt(t.Days, 10)}})
 			}
-			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + "\n\n" + w.pickTerm, &Keyboard{InlineKeyboard: append(rows, back)}
+			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + "\n\n" + w.pickTerm, &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 		}
 		t, ok := o.Term(days)
 		if !ok {
@@ -183,7 +183,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 		}
 		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + "\n\n" + w.payHow
 		rows := w.payButtons(pay+":"+ref+":", t.Stars, t.Rub, av, b.addonName(ctx))
-		return text, &Keyboard{InlineKeyboard: append(rows, back)}
+		return text, &Keyboard{KeepRows: true, InlineKeyboard: append(rows, back)}
 	}
 	return html.EscapeString(w.notForSale), &Keyboard{InlineKeyboard: [][]Button{back}}
 }
