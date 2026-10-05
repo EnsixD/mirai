@@ -212,6 +212,22 @@ type Keyboard struct {
 	InlineKeyboard [][]Button `json:"inline_keyboard"`
 }
 
+// MarshalJSON keeps every bot screen compact without changing button order or actions.
+func (k Keyboard) MarshalJSON() ([]byte, error) {
+	rows := make([][]Button, 0)
+	for _, row := range k.InlineKeyboard {
+		for _, button := range row {
+			if len(rows) == 0 || len(rows[len(rows)-1]) == 2 {
+				rows = append(rows, []Button{})
+			}
+			rows[len(rows)-1] = append(rows[len(rows)-1], button)
+		}
+	}
+	return json.Marshal(struct {
+		Rows [][]Button `json:"inline_keyboard"`
+	}{rows})
+}
+
 // Me is getMe: the token's bot.
 func (c *Client) Me(ctx context.Context) (User, error) {
 	var u User

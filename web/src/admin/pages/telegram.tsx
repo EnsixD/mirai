@@ -685,11 +685,7 @@ function MenuCard({ draft, setDraft }: { draft: Config; setDraft: (c: Config) =>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--ink-500)]">
                 <span>{actionLabel(b.action)}</span>
-                {i > 0 ? (
-                  <label className="flex items-center gap-1.5">
-                    <input type="checkbox" className="check" checked={b.row} onChange={(e) => set(i, { row: e.target.checked })} /> {t("telegram.sameRow")}
-                  </label>
-                ) : null}
+
               </div>
               {b.action === "url" ? <input className="input mono mt-2" value={b.url ?? ""} onChange={(e) => set(i, { url: e.target.value })} placeholder="https://… / tg://…" aria-label={t("telegram.buttonUrl")} /> : null}
               {b.action === "page" ? (
@@ -887,10 +883,10 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
   for (const b of previewButtons) {
     if (!b.on || (b.action === "support" && !support) || (b.action === "app" && !(draft.mini_app && v.mini_app_url))) continue;
     const last = rows[rows.length - 1];
-    if (b.row && last && last.length < 3) last.push(b);
+    if (last && last.length < 2) last.push(b);
     else rows.push([b]);
   }
-  if (screen === "main" && draft.admin.enabled) rows.push([{id: "admin-preview", action: "page", label: "⚙️ Админ-панель · только ваш ID", on: true, row: false}]);
+  if (screen === "main" && draft.admin.enabled) { const admin: MenuButton = {id: "admin-preview", action: "page", label: "⚙️ Админ-панель · только ваш ID", on: true, row: false}; const last = rows[rows.length - 1]; if (last && last.length < 2) last.push(admin); else rows.push([admin]); }
   return (
     <section {...rise(1)} aria-label={t("telegram.preview")}>
       <div className="card-head">
@@ -942,11 +938,11 @@ function AdminMenuCard({draft,setDraft}:{draft:Config;setDraft:(c:Config)=>void}
  const update=(next:typeof buttons)=>setDraft({...draft,admin:{...draft.admin,buttons:next,version:2,users:next.some(b=>b.action==="users"&&b.on),subscriptions:next.some(b=>b.action==="subscriptions"&&b.on),search:next.some(b=>b.action==="search"&&b.on)}});
  const change=(id:string,values:Partial<(typeof buttons)[number]>)=>update(buttons.map(b=>b.id===id?{...b,...values}:b));
  const labels={users:"👥 Пользователи",subscriptions:"📋 Все подписки",search:"🔎 Поиск",grant:"🎁 Выдать подписку"};
- const rows:typeof buttons[]=[];for(const b of buttons){if(!b.on)continue;const last=rows[rows.length-1];if(b.row&&last&&last.length<3)last.push(b);else rows.push([b]);}
+ const rows:typeof buttons[]=[];for(const b of [...buttons,{id:"home-preview",action:"users" as const,label:"← Главное меню",on:true,row:false}]){if(!b.on)continue;const last=rows[rows.length-1];if(last&&last.length<2)last.push(b);else rows.push([b]);}
  return <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"><section className="card glass"><div className="flex items-center gap-3 mb-4"><h2 className="card-title flex-1">Админ-меню</h2><Switch checked={draft.admin.enabled} label="Админ-меню" onChange={enabled=>setDraft({...draft,admin:{...draft.admin,enabled}})}/></div><p className="card-sub mb-4">Перетаскивайте кнопки за маркер. Изменения сохраняются кнопкой «Сохранить».</p>
- <Reorder.Group axis="y" values={buttons.map(b=>b.id)} onReorder={ids=>update(ids.map(id=>buttons.find(b=>b.id===id)!))} className="flex flex-col gap-2"><AnimatePresence initial={false}>{buttons.map((b,i)=><MenuReorderItem key={b.id} id={b.id} reduce={!!reduce}><div className="flex items-center gap-2"><Switch checked={b.on} label={b.label} onChange={on=>change(b.id,{on})}/><input className="input min-w-0 flex-1" maxLength={40} value={b.label} onChange={e=>change(b.id,{label:e.target.value})} aria-label="Название кнопки"/><button type="button" className="icon-btn menu-drag-handle" data-menu-drag style={{touchAction:"none"}} aria-label="Перетащить кнопку"><GripVertical size={18}/></button><button type="button" className="icon-btn" aria-label="Удалить кнопку" onClick={()=>update(buttons.filter(item=>item.id!==b.id))}><Trash2 size={16}/></button></div>{i>0?<label className="flex items-center gap-2 mt-2 text-xs"><input type="checkbox" className="check" checked={b.row} onChange={e=>change(b.id,{row:e.target.checked})}/>В одном ряду с предыдущей</label>:null}</MenuReorderItem>)}</AnimatePresence></Reorder.Group>
+ <Reorder.Group axis="y" values={buttons.map(b=>b.id)} onReorder={ids=>update(ids.map(id=>buttons.find(b=>b.id===id)!))} className="flex flex-col gap-2"><AnimatePresence initial={false}>{buttons.map((b)=><MenuReorderItem key={b.id} id={b.id} reduce={!!reduce}><div className="flex items-center gap-2"><Switch checked={b.on} label={b.label} onChange={on=>change(b.id,{on})}/><input className="input min-w-0 flex-1" maxLength={40} value={b.label} onChange={e=>change(b.id,{label:e.target.value})} aria-label="Название кнопки"/><button type="button" className="icon-btn menu-drag-handle" data-menu-drag style={{touchAction:"none"}} aria-label="Перетащить кнопку"><GripVertical size={18}/></button><button type="button" className="icon-btn" aria-label="Удалить кнопку" onClick={()=>update(buttons.filter(item=>item.id!==b.id))}><Trash2 size={16}/></button></div></MenuReorderItem>)}</AnimatePresence></Reorder.Group>
  <div className="flex flex-wrap gap-2 mt-3">{(["users","subscriptions","search"] as const).filter(action=>!buttons.some(b=>b.action===action)).map(action=><button type="button" className="chip-btn" key={action} onClick={()=>update([...buttons,{id:action,action,label:labels[action],on:true,row:false}])}>+ {labels[action]}</button>)}</div><div className="flex items-center gap-3 mt-5"><span>Выдавать подписку в профиле пользователя</span><Switch checked={draft.admin.grant} label="Выдача подписки" onChange={grant=>setDraft({...draft,admin:{...draft.admin,grant}})}/></div><div className="flex items-center gap-3 mt-5"><span>Статистика в шапке</span><Switch checked={draft.admin.statistics} label="Статистика" onChange={statistics=>setDraft({...draft,admin:{...draft.admin,statistics}})}/></div></section>
- <section className="card glass"><h2 className="card-title mb-3">Превью · только ваш Telegram ID</h2><div className="tg-chat"><div className="tg-bubble">{"⚙️ Админ-панель Mirai\n\nУправление пользователями и подписками"}{draft.admin.statistics?"\nАктивные: 24 · Истекают: 3\nИстекли: 2 · Лимит: 1 · Заморожены: 0":""}</div><div className="tg-keyboard">{draft.admin.enabled?rows.map(row=><div className="tg-row" key={row[0]!.id}>{row.map(b=><button type="button" className="tg-btn" key={b.id}>{b.label}</button>)}</div>):<div className="tg-bubble">Админ-меню отключено</div>}<div className="tg-row"><button type="button" className="tg-btn">← Главное меню</button></div></div></div></section></div>;
+ <section className="card glass"><h2 className="card-title mb-3">Превью · только ваш Telegram ID</h2><div className="tg-chat"><div className="tg-bubble">{"⚙️ Админ-панель Mirai\n\nУправление пользователями и подписками"}{draft.admin.statistics?"\nАктивные: 24 · Истекают: 3\nИстекли: 2 · Лимит: 1 · Заморожены: 0":""}</div><div className="tg-keyboard">{draft.admin.enabled?rows.map(row=><div className="tg-row" key={row[0]!.id}>{row.map(b=><button type="button" className="tg-btn" key={b.id}>{b.label}</button>)}</div>):<div className="tg-bubble">Админ-меню отключено</div>}</div></div></section></div>;
 }
 
 function DeviceResetCard({v}: {v: View}) {
