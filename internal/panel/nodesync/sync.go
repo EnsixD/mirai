@@ -483,6 +483,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 		// grants included.
 		b := domain.TrafficBatch{Main: map[int64]domain.Bytes{}, Pools: map[[2]int64]domain.Bytes{}}
 		for slot, t := range c.Slots {
+			if err := q.CountDeviceTraffic(ctx, slot, t.Up, t.Down); err != nil {
+				return err
+			}
 			if uid, ok := owner[slot]; ok {
 				cur := b.Main[uid]
 				b.Main[uid] = domain.Bytes{Up: cur.Up + t.Up, Down: cur.Down + t.Down}
@@ -498,6 +501,9 @@ func (s *Syncer) pullCounters(ctx context.Context) {
 				id, err := strconv.ParseInt(pool, 10, 64)
 				if err != nil {
 					continue
+				}
+				if err := q.CountDeviceTraffic(ctx, slot, t.Up, t.Down); err != nil {
+					return err
 				}
 				k := [2]int64{uid, id}
 				cur := b.Pools[k]

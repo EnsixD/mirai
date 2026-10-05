@@ -665,9 +665,21 @@
           },
           "os_version": {
             "type": "string"
+          },
+          "traffic_down": {
+            "description": "Downloaded bytes since device binding",
+            "format": "int64",
+            "type": "integer"
+          },
+          "traffic_up": {
+            "description": "Uploaded bytes since device binding; shared for apps without HWID",
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
+          "traffic_up",
+          "traffic_down",
           "id",
           "hwid",
           "os",
@@ -1586,7 +1598,7 @@
             "type": "integer"
           },
           "obfs": {
-            "description": "Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет",
+            "description": "Hysteria2: salamander или пусто (без обфускации); у других типов поля нет",
             "type": "string"
           },
           "outbound": {
@@ -2235,12 +2247,6 @@
             "minimum": 100,
             "type": "integer"
           },
-          "price_stars": {
-            "format": "int64",
-            "maximum": 10000,
-            "minimum": 1,
-            "type": "integer"
-          },
           "sort": {
             "format": "int64",
             "type": "integer"
@@ -2300,14 +2306,6 @@
               "null"
             ]
           },
-          "price_stars": {
-            "description": "Цена в Telegram Stars; null — не продаётся за Stars",
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
           "sort": {
             "format": "int64",
             "type": "integer"
@@ -2320,7 +2318,6 @@
           "pool_id",
           "lifetime",
           "days",
-          "price_stars",
           "price_rub",
           "on_sale",
           "sort"
@@ -2434,10 +2431,9 @@
             "type": "string"
           },
           "obfs": {
-            "description": "Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат",
+            "description": "Обфускация Hysteria2",
             "enum": [
-              "salamander",
-              "gecko"
+              "salamander"
             ],
             "type": "string"
           },
@@ -2504,9 +2500,6 @@
             "type": "boolean"
           },
           "renew_resets_traffic": {
-            "type": "boolean"
-          },
-          "stars": {
             "type": "boolean"
           },
           "trial_tariff_id": {
@@ -2770,14 +2763,14 @@
           },
           "available": {
             "$ref": "#/components/schemas/PaymentSettingsViewAvailableStruct",
-            "description": "Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"
+            "description": "Настроенные и доступные способы оплаты"
           },
           "enabled": {
             "description": "Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются",
             "type": "boolean"
           },
           "moving": {
-            "description": "Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит",
+            "description": "Адаптеры платежей, ожидающие установки",
             "items": {
               "type": "string"
             },
@@ -2792,12 +2785,8 @@
             "description": "Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок",
             "type": "boolean"
           },
-          "stars": {
-            "description": "Telegram Stars: нужен только запущенный бот",
-            "type": "boolean"
-          },
           "trial_tariff_id": {
-            "description": "Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже",
+            "description": "Тариф пробного периода: один раз на Telegram-аккаунт, тариф отображается в разделе покупки; null — пробного периода нет. Работает и при выключенной продаже",
             "format": "int64",
             "type": [
               "integer",
@@ -2812,7 +2801,6 @@
         },
         "required": [
           "enabled",
-          "stars",
           "allow_new",
           "renew_resets_traffic",
           "trial_tariff_id",
@@ -2832,13 +2820,9 @@
               "type": "string"
             },
             "type": "array"
-          },
-          "stars": {
-            "type": "boolean"
           }
         },
         "required": [
-          "stars",
           "addons"
         ],
         "type": "object"
@@ -2873,7 +2857,7 @@
         "additionalProperties": false,
         "properties": {
           "amount": {
-            "description": "Stars или копейки",
+            "description": "Сумма в копейках",
             "format": "int64",
             "type": "integer"
           },
@@ -2918,7 +2902,7 @@
             "type": "string"
           },
           "provider": {
-            "description": "stars или addon:\u003cid\u003e — адаптер маркетплейса",
+            "description": "addon:yookassa — адаптер ЮKassa",
             "type": "string"
           },
           "refunded_at": {
@@ -4026,13 +4010,6 @@
             "minimum": 100,
             "type": "integer"
           },
-          "price_stars": {
-            "description": "Цена в Telegram Stars",
-            "format": "int64",
-            "maximum": 10000,
-            "minimum": 1,
-            "type": "integer"
-          },
           "reset_strategy": {
             "default": "none",
             "enum": [
@@ -4047,7 +4024,7 @@
             "type": "integer"
           },
           "terms": {
-            "description": "Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений",
+            "description": "Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_rub берутся из первого. Не передан — первый срок из duration_days, price_rub, остальные без изменений",
             "items": {
               "$ref": "#/components/schemas/TermBody"
             },
@@ -4112,15 +4089,7 @@
             "type": "string"
           },
           "price_rub": {
-            "description": "Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли",
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "price_stars": {
-            "description": "Цена в Telegram Stars; null — не продаётся за Stars",
+            "description": "Цена в копейках (ЮKassa); null — не продаётся за рубли",
             "format": "int64",
             "type": [
               "integer",
@@ -4140,7 +4109,7 @@
             "type": "integer"
           },
           "terms": {
-            "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub",
+            "description": "Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_rub",
             "items": {
               "$ref": "#/components/schemas/TermView"
             },
@@ -4164,7 +4133,6 @@
           "reset_strategy",
           "billing_day",
           "price_label",
-          "price_stars",
           "price_rub",
           "on_sale",
           "terms",
@@ -4373,13 +4341,6 @@
             "maximum": 100000000,
             "minimum": 100,
             "type": "integer"
-          },
-          "price_stars": {
-            "description": "Цена в Telegram Stars",
-            "format": "int64",
-            "maximum": 10000,
-            "minimum": 1,
-            "type": "integer"
           }
         },
         "required": [
@@ -4402,19 +4363,10 @@
               "integer",
               "null"
             ]
-          },
-          "price_stars": {
-            "description": "Цена в Telegram Stars; null — не за Stars",
-            "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
           }
         },
         "required": [
           "days",
-          "price_stars",
           "price_rub"
         ],
         "type": "object"
@@ -6880,7 +6832,7 @@
             "in": "query",
             "name": "provider",
             "schema": {
-              "pattern": "^(stars|addon:[a-z0-9][a-z0-9-]{0,31})?$",
+              "pattern": "^(addon:yookassa)?$",
               "type": "string"
             }
           },
@@ -7056,7 +7008,7 @@
             "description": "Error"
           }
         },
-        "summary": "Вернуть Stars покупателю",
+        "summary": "Вернуть платёж покупателю",
         "tags": [
           "payments"
         ],

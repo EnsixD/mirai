@@ -588,7 +588,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Вернуть Stars покупателю */
+        /** Вернуть платёж покупателю */
         post: operations["refund-payment"];
         delete?: never;
         options?: never;
@@ -1497,6 +1497,16 @@ export interface components {
             online: boolean;
             os: string;
             os_version: string;
+            /**
+             * Format: int64
+             * @description Downloaded bytes since device binding
+             */
+            traffic_down: number;
+            /**
+             * Format: int64
+             * @description Uploaded bytes since device binding; shared for apps without HWID
+             */
+            traffic_up: number;
         };
         BroadcastInputBody: {
             /** @description Обычный текст; {brand} — название сервиса */
@@ -1821,7 +1831,7 @@ export interface components {
             network: string;
             /** Format: int64 */
             node_id: number;
-            /** @description Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет */
+            /** @description Hysteria2: salamander или пусто (без обфускации); у других типов поля нет */
             obfs?: string;
             /**
              * @description Выход в интернет: напрямую с сервера, через WARP ноды или через другую ноду (каскад)
@@ -2033,8 +2043,6 @@ export interface components {
              */
             price_rub?: number;
             /** Format: int64 */
-            price_stars?: number;
-            /** Format: int64 */
             sort?: number;
         };
         PackageView: {
@@ -2064,11 +2072,6 @@ export interface components {
              * @description Цена в копейках; null — не продаётся за рубли
              */
             price_rub: number | null;
-            /**
-             * Format: int64
-             * @description Цена в Telegram Stars; null — не продаётся за Stars
-             */
-            price_stars: number | null;
             /** Format: int64 */
             sort: number;
         };
@@ -2115,10 +2118,10 @@ export interface components {
             /** @description Адрес, на котором нода слушает: пусто — все адреса, иначе один IP (127.0.0.1 — за nginx или HAProxy на том же сервере). Свой адрес выключает перенос порта */
             listen?: string;
             /**
-             * @description Обфускация Hysteria2. Gecko понимают только приложения на ядре mihomo 1.19.26+: остальные это подключение не получат
+             * @description Обфускация Hysteria2
              * @enum {string}
              */
-            obfs?: "salamander" | "gecko";
+            obfs?: "salamander";
             /**
              * @description Выход в интернет: напрямую, через WARP ноды или через другую ноду
              * @enum {string}
@@ -2145,7 +2148,6 @@ export interface components {
             allow_new?: boolean;
             enabled?: boolean;
             renew_resets_traffic?: boolean;
-            stars?: boolean;
             /**
              * Format: int64
              * @description Тариф пробного периода; 0 — выключить
@@ -2240,11 +2242,11 @@ export interface components {
         PaymentSettingsView: {
             /** @description Новые люди могут купить подписку в боте; иначе — только продление */
             allow_new: boolean;
-            /** @description Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен */
+            /** @description Настроенные и доступные способы оплаты */
             available: components["schemas"]["PaymentSettingsViewAvailableStruct"];
             /** @description Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются */
             enabled: boolean;
-            /** @description Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит */
+            /** @description Адаптеры платежей, ожидающие установки */
             moving: string[];
             /**
              * Format: int64
@@ -2253,11 +2255,9 @@ export interface components {
             on_sale: number;
             /** @description Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок */
             renew_resets_traffic: boolean;
-            /** @description Telegram Stars: нужен только запущенный бот */
-            stars: boolean;
             /**
              * Format: int64
-             * @description Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже
+             * @description Тариф пробного периода: один раз на Telegram-аккаунт, тариф отображается в разделе покупки; null — пробного периода нет. Работает и при выключенной продаже
              */
             trial_tariff_id: number | null;
             /**
@@ -2269,7 +2269,6 @@ export interface components {
         PaymentSettingsViewAvailableStruct: {
             /** @description Адаптеры маркетплейса, которые принимают оплату прямо сейчас */
             addons: string[];
-            stars: boolean;
         };
         PaymentTotal: {
             /** Format: int64 */
@@ -2282,7 +2281,7 @@ export interface components {
         PaymentView: {
             /**
              * Format: int64
-             * @description Stars или копейки
+             * @description Сумма в копейках
              */
             amount: number;
             /** Format: date-time */
@@ -2304,7 +2303,7 @@ export interface components {
             kind: "new" | "renew" | "package";
             /** Format: date-time */
             paid_at?: string;
-            /** @description stars или addon:<id> — адаптер маркетплейса */
+            /** @description addon:yookassa — адаптер ЮKassa */
             provider: string;
             /** Format: date-time */
             refunded_at?: string;
@@ -2694,18 +2693,13 @@ export interface components {
              */
             price_rub?: number;
             /**
-             * Format: int64
-             * @description Цена в Telegram Stars
-             */
-            price_stars?: number;
-            /**
              * @default none
              * @enum {string}
              */
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort?: number;
-            /** @description Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений */
+            /** @description Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_rub берутся из первого. Не передан — первый срок из duration_days, price_rub, остальные без изменений */
             terms?: components["schemas"]["TermBody"][];
             /** Format: int64 */
             traffic_limit?: number;
@@ -2733,19 +2727,14 @@ export interface components {
             price_label: string;
             /**
              * Format: int64
-             * @description Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли
+             * @description Цена в копейках (ЮKassa); null — не продаётся за рубли
              */
             price_rub: number | null;
-            /**
-             * Format: int64
-             * @description Цена в Telegram Stars; null — не продаётся за Stars
-             */
-            price_stars: number | null;
             /** @enum {string} */
             reset_strategy: "none" | "month_start" | "period";
             /** Format: int64 */
             sort: number;
-            /** @description Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub */
+            /** @description Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_rub */
             terms: components["schemas"]["TermView"][];
             /**
              * Format: int64
@@ -2844,11 +2833,6 @@ export interface components {
              * @description Цена в копейках: 19900 — 199 ₽
              */
             price_rub?: number;
-            /**
-             * Format: int64
-             * @description Цена в Telegram Stars
-             */
-            price_stars?: number;
         };
         TermView: {
             /**
@@ -2861,11 +2845,6 @@ export interface components {
              * @description Цена в копейках; null — не за рубли
              */
             price_rub: number | null;
-            /**
-             * Format: int64
-             * @description Цена в Telegram Stars; null — не за Stars
-             */
-            price_stars: number | null;
         };
         Texts: {
             /** @description Уведомление: подписка закончилась */

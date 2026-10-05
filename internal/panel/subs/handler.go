@@ -772,14 +772,16 @@ type Info struct {
 
 // DeviceItem is a bound device as the subscription page lists it.
 type DeviceItem struct {
-	ID        int64     `json:"id"`
-	OS        string    `json:"os"`
-	OSVersion string    `json:"os_version"`
-	Model     string    `json:"model"`
-	App       string    `json:"app"`
-	Shared    bool      `json:"shared" doc:"Apps that send no device id, seated together"`
-	CreatedAt time.Time `json:"created_at"`
-	LastSeen  time.Time `json:"last_seen"`
+	TrafficUp   int64     `json:"traffic_up"`
+	TrafficDown int64     `json:"traffic_down"`
+	ID          int64     `json:"id"`
+	OS          string    `json:"os"`
+	OSVersion   string    `json:"os_version"`
+	Model       string    `json:"model"`
+	App         string    `json:"app"`
+	Shared      bool      `json:"shared" doc:"Apps that send no device id, seated together"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, prof Profile, cfg Config) {
@@ -803,8 +805,13 @@ func (h *Handler) info(ctx context.Context, w http.ResponseWriter, u db.User, pr
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		traffic, err := h.st.Q.DeviceTrafficOf(ctx, u.ID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		for _, d := range devs {
-			out.Bound = append(out.Bound, DeviceItem{ID: d.ID, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, Shared: d.Hwid == "",
+			out.Bound = append(out.Bound, DeviceItem{TrafficUp: traffic[d.ID].Up, TrafficDown: traffic[d.ID].Down, ID: d.ID, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, Shared: d.Hwid == "",
 				CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC()})
 		}
 		if t := h.nextDeviceReset(ctx, u.ID); !t.IsZero() {

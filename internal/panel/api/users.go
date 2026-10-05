@@ -488,16 +488,18 @@ func (h *handlers) extendUser(ctx context.Context, in *extendInput) (*userOutput
 
 // BoundDeviceView is a device bound to a subscription, as the admin sees it.
 type BoundDeviceView struct {
-	ID        int64     `json:"id"`
-	HWID      string    `json:"hwid" doc:"ID устройства от приложения; пусто — общее место приложений без ID"`
-	OS        string    `json:"os"`
-	OSVersion string    `json:"os_version"`
-	Model     string    `json:"model"`
-	App       string    `json:"app"`
-	LastIP    string    `json:"last_ip"`
-	Online    bool      `json:"online"`
-	CreatedAt time.Time `json:"created_at"`
-	LastSeen  time.Time `json:"last_seen"`
+	TrafficUp   int64     `json:"traffic_up" doc:"Uploaded bytes since device binding; shared for apps without HWID"`
+	TrafficDown int64     `json:"traffic_down" doc:"Downloaded bytes since device binding"`
+	ID          int64     `json:"id"`
+	HWID        string    `json:"hwid" doc:"ID устройства от приложения; пусто — общее место приложений без ID"`
+	OS          string    `json:"os"`
+	OSVersion   string    `json:"os_version"`
+	Model       string    `json:"model"`
+	App         string    `json:"app"`
+	LastIP      string    `json:"last_ip"`
+	Online      bool      `json:"online"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastSeen    time.Time `json:"last_seen"`
 }
 
 type boundDevicesOutput struct{ Body []BoundDeviceView }
@@ -524,9 +526,13 @@ func (h *handlers) boundDevices(ctx context.Context, in *userIDInput) (*boundDev
 		name[r.DeviceID] = r.SlotName
 	}
 	env := userEnv{online: h.online()}
+	traffic, err := h.d.Store.Q.DeviceTrafficOf(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
 	out := &boundDevicesOutput{Body: []BoundDeviceView{}}
 	for _, d := range devs {
-		out.Body = append(out.Body, BoundDeviceView{ID: d.ID, HWID: d.Hwid, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, LastIP: d.LastIp,
+		out.Body = append(out.Body, BoundDeviceView{TrafficUp: traffic[d.ID].Up, TrafficDown: traffic[d.ID].Down, ID: d.ID, HWID: d.Hwid, OS: d.Os, OSVersion: d.OsVersion, Model: d.Model, App: d.App, LastIP: d.LastIp,
 			Online: len(env.liveIPs([]string{name[d.ID]})) > 0, CreatedAt: time.Unix(d.CreatedAt, 0).UTC(), LastSeen: time.Unix(d.LastSeen, 0).UTC()})
 	}
 	return out, nil
