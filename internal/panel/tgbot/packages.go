@@ -54,27 +54,27 @@ func (b *Bot) trafficShop(ctx context.Context, w *words, chat int64, u db.User, 
 	if len(offers) == 0 {
 		lines = append(lines, html.EscapeString(w.payUnavailable))
 	}
-	return strings.Join(lines, "\n"), &Keyboard{append(rows, []Button{{Text: w.back, CallbackData: "s"}})}
+	return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, []Button{{Text: w.back, CallbackData: "s"}})}
 }
 
 // trafficPackage: one package and a button per way to pay.
 func (b *Bot) trafficPackage(ctx context.Context, w *words, userID, id int64) (string, *Keyboard) {
 	back := []Button{{Text: w.back, CallbackData: "x"}}
 	if b.d.Billing == nil {
-		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
+		return html.EscapeString(w.payUnavailable), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	offers, av, err := b.d.Billing.PackageOffers(ctx, userID)
 	if err != nil {
-		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
+		return html.EscapeString(w.payUnavailable), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	for _, o := range offers {
 		if o.Package.ID != id {
 			continue
 		}
 		text := "<b>" + html.EscapeString(o.Package.Name) + "</b>\n" + html.EscapeString(billing.DescribePackage(o.Package, o.Pool, b.lang(ctx))) + "\n\n" + w.payHow
-		return text, &Keyboard{append(w.payButtons("xp:"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av, b.addonName(ctx)), back)}
+		return text, &Keyboard{InlineKeyboard: append(w.payButtons("xp:"+strconv.FormatInt(id, 10)+":", o.Stars, o.Rub, av, b.addonName(ctx)), back)}
 	}
-	return html.EscapeString(w.packageGone), &Keyboard{[][]Button{back}}
+	return html.EscapeString(w.packageGone), &Keyboard{InlineKeyboard: [][]Button{back}}
 }
 
 // payButtons: a button per provider that takes the price; data is the callback prefix
@@ -124,7 +124,7 @@ func (b *Bot) trafficInvoice(ctx context.Context, w *words, chat, userID int64, 
 	id, _ := strconv.ParseInt(idStr, 10, 64)
 	provider, ok := providerOf(code)
 	if !ok || b.d.Billing == nil {
-		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
+		return html.EscapeString(w.payUnavailable), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	p, err := b.d.Billing.PackageInvoice(ctx, billing.PackageRequest{TgID: chat, UserID: userID, PackageID: id, Provider: provider})
 	if err != nil {
@@ -132,10 +132,10 @@ func (b *Bot) trafficInvoice(ctx context.Context, w *words, chat, userID int64, 
 		if msg == w.notForSale {
 			msg = w.packageGone
 		}
-		return html.EscapeString(msg), &Keyboard{[][]Button{back}}
+		return html.EscapeString(msg), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(p.TariffName), html.EscapeString(w.price(p.Amount, p.Currency)), w.payPackage)
-	return text, &Keyboard{[][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
+	return text, &Keyboard{InlineKeyboard: [][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
 }
 
 // withPackages is a quota with what is left of its packages: "100 GB + packages 32 GB".

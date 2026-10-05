@@ -41,11 +41,8 @@ func (b *Bot) instruction(ctx context.Context, cfg Config) (string, *Keyboard) {
 		}
 	}
 	rows := [][]Button{{{Text: "📲 Happ · iOS", URL: "https://apps.apple.com/app/happ-proxy-utility/id6504287215"}, {Text: "🤖 Happ · Android", URL: "https://play.google.com/store/apps/details?id=com.happproxy"}}, {{Text: "🤖 INCY · Android", URL: "https://play.google.com/store/apps/details?id=com.incy.app"}}}
-	if support := b.supportURL(ctx); support != "" {
-		rows = append(rows, []Button{{Text: "💬 Нужна помощь", URL: support}})
-	}
 	rows = append(rows, []Button{{Text: "← Меню", CallbackData: "m"}})
-	return text, &Keyboard{rows}
+	return text, &Keyboard{InlineKeyboard: rows, KeepRows: true}
 }
 
 func (b *Bot) ordersScreen(ctx context.Context, chat int64, arg string, admin bool) (string, *Keyboard) {
@@ -102,7 +99,7 @@ func (b *Bot) ordersScreen(ctx context.Context, chat int64, arg string, admin bo
 			rows = [][]Button{{{Text: "🛒 Купить", CallbackData: "b"}, back}}
 		}
 	}
-	return text, &Keyboard{rows}
+	return text, &Keyboard{InlineKeyboard: rows}
 }
 
 func (b *Bot) orderScreen(ctx context.Context, chat, id int64, admin bool) (string, *Keyboard) {
@@ -161,7 +158,7 @@ func (b *Bot) orderScreen(ctx context.Context, chat, id int64, admin bool) (stri
 	if admin {
 		rows = append(rows, adminBack())
 	}
-	return text, &Keyboard{rows}
+	return text, &Keyboard{InlineKeyboard: rows}
 }
 
 func (b *Bot) orderAction(ctx context.Context, chat, id int64, admin, close bool) (string, string) {
@@ -187,6 +184,9 @@ func (b *Bot) orderAction(ctx context.Context, chat, id int64, admin, close bool
 			return prefix + strconv.FormatInt(id, 10), "Платёж подтверждён. Заказ уже обрабатывается или выполнен."
 		}
 		prefix = "orders"
+		if admin && p.Status == "pending" && latest.Status == "expired" {
+			b.NotifyAdminNotice(ctx, p.TgID, "❌ <b>Заказ закрыт администратором</b>\n\nЭтот заказ больше не ожидает оплаты. Если вы уже оплатили его, платёж будет обработан после подтверждения платёжной системой. Если это ошибка, обратитесь в поддержку.")
+		}
 		if admin {
 			prefix = "a:orders:0"
 		}

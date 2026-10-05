@@ -21,7 +21,7 @@ func (b *Bot) customerProfile(ctx context.Context, cfg Config, chat int64, subsc
 	totals, err := b.d.Store.Q.CustomerPurchases(ctx, chat)
 	back := []Button{{Text: wordsFor(cfg.Lang).back, CallbackData: "m"}}
 	if err != nil {
-		return tr("Не удалось загрузить профиль. Попробуйте ещё раз.", "Could not load your profile. Please try again."), &Keyboard{[][]Button{back}}
+		return tr("Не удалось загрузить профиль. Попробуйте ещё раз.", "Could not load your profile. Please try again."), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	name := strconv.FormatInt(chat, 10)
 	if account, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil {
@@ -55,5 +55,5 @@ func (b *Bot) customerProfile(ctx context.Context, cfg Config, chat int64, subsc
 	rows := [][]Button{}
 	rows = append(rows, []Button{{Text: tr("📋 Мои подписки", "📋 My subscriptions"), CallbackData: "w"}})
 	rows = append(rows, []Button{{Text: tr("🧾 Мои заказы", "🧾 My orders"), CallbackData: "orders"}})
-	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
+	return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, back)}
 }

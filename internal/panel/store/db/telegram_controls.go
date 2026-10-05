@@ -2,6 +2,27 @@ package db
 
 import "context"
 
+func (q *Queries) TelegramBannerMessage(ctx context.Context, chat int64) (int64, error) {
+	var id int64
+	err := q.db.QueryRowContext(ctx, `SELECT banner_msg_id FROM tg_chats WHERE tg_id=$1`, chat).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) TelegramBannerFile(ctx context.Context, chat int64) (string, error) {
+	var id string
+	err := q.db.QueryRowContext(ctx, `SELECT banner_file_id FROM tg_chats WHERE tg_id=$1`, chat).Scan(&id)
+	return id, err
+}
+
+func (q *Queries) SetTelegramBannerMessage(ctx context.Context, chat, msg int64, photo ...string) error {
+	file := ""
+	if len(photo) > 0 {
+		file = photo[0]
+	}
+	_, err := q.db.ExecContext(ctx, `UPDATE tg_chats SET banner_msg_id=$2,banner_file_id=$3 WHERE tg_id=$1`, chat, msg, file)
+	return err
+}
+
 // DeleteTelegramVisitor removes only an account that still has no subscriptions.
 func (q *Queries) DeleteTelegramVisitor(ctx context.Context, id int64) (int64, error) {
 	r, err := q.db.ExecContext(ctx, `DELETE FROM tg_chats c WHERE c.tg_id=$1 AND NOT EXISTS (SELECT 1 FROM tg_links l WHERE l.tg_id=c.tg_id)`, id)

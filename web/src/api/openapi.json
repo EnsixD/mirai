@@ -2119,6 +2119,10 @@
       "Notify": {
         "additionalProperties": false,
         "properties": {
+          "admin_changes": {
+            "description": "Уведомлять о выдаче и изменениях подписки администратором",
+            "type": "boolean"
+          },
           "expire_1d": {
             "type": "boolean"
           },
@@ -2136,6 +2140,7 @@
           }
         },
         "required": [
+          "admin_changes",
           "expire_3d",
           "expire_1d",
           "expired",
@@ -2644,6 +2649,11 @@
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
+          },
+          "banner_image": {
+            "description": "PNG/JPEG data URL up to 512 KB; empty removes the banner",
+            "maxLength": 720000,
+            "type": "string"
           },
           "config": {
             "$ref": "#/components/schemas/Config"
@@ -4263,6 +4273,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "banner_preview": {
+            "description": "Uploaded banner preview; empty until the administrator uploads an image",
+            "type": "string"
+          },
           "bot": {
             "$ref": "#/components/schemas/TelegramBot"
           },
@@ -4320,6 +4334,7 @@
           }
         },
         "required": [
+          "banner_preview",
           "maintenance",
           "device_reset",
           "enabled",
@@ -8176,6 +8191,47 @@
           }
         },
         "summary": "Отправить бэкап сейчас",
+        "tags": [
+          "telegram"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/telegram/banner": {
+      "get": {
+        "operationId": "telegram-banner-preview",
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {}
+            },
+            "description": "Banner image",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Private Telegram banner preview",
         "tags": [
           "telegram"
         ],

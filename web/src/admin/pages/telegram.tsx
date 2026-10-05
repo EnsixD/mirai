@@ -123,6 +123,7 @@ function TelegramBody({ v }: { v: View }) {
             left={
               <>
                 <ConnectCard v={v} />
+                <BannerCard v={v} />
                 <RouteCard v={v} />
               </>
             }
@@ -133,6 +134,7 @@ function TelegramBody({ v }: { v: View }) {
             wide="left"
             left={
               <>
+                <BannerCard v={v} />
                 <MenuCard draft={draft} setDraft={setDraft} />
                 <TextsCard draft={draft} setDraft={setDraft} defaults={v.defaults} />
               </>
@@ -147,7 +149,7 @@ function TelegramBody({ v }: { v: View }) {
             <BackupCard />
           </div>
         ) : tab === "admin" ? (
-          <><AdminMenuCard draft={draft} setDraft={setDraft} /><MaintenanceCard v={v} /><DeviceResetCard v={v} /></>
+          <><AdminMenuCard draft={draft} setDraft={setDraft} v={v} /><MaintenanceCard v={v} /><DeviceResetCard v={v} /></>
         ) : (
           <div className="w-full">
             <BroadcastCard v={v} />
@@ -750,7 +752,7 @@ function TextsCard({ draft, setDraft, defaults }: { draft: Config; setDraft: (c:
   );
 }
 
-const NOTICES: (keyof Schemas["Notify"])[] = ["expire_3d", "expire_1d", "expired", "traffic_90", "traffic_100"];
+const NOTICES: (keyof Schemas["Notify"])[] = ["expire_3d", "expire_1d", "expired", "traffic_90", "traffic_100", "admin_changes"];
 
 function OptionsCard({ draft, setDraft, v }: { draft: Config; setDraft: (c: Config) => void; v: View }) {
   const row = (title: string, sub: string, on: boolean, change: (v: boolean) => void) => (
@@ -774,7 +776,7 @@ function OptionsCard({ draft, setDraft, v }: { draft: Config; setDraft: (c: Conf
         {row(t("telegram.miniApp"), v.mini_app_url ? t("telegram.miniAppSub") : t("telegram.miniAppNoCert"), draft.mini_app, (on) => setDraft({ ...draft, mini_app: on }))}
         {row(t("telegram.cleanChat"), t("telegram.cleanChatSub"), draft.clean_chat, (on) => setDraft({ ...draft, clean_chat: on }))}
         {row(t("telegram.quietNight"), t("telegram.quietNightSub"), draft.quiet_night, (on) => setDraft({ ...draft, quiet_night: on }))}
-        {NOTICES.map((k) => row(t(`telegram.notice.${k}`), t("telegram.noticeSub"), draft.notify[k], (on) => setDraft({ ...draft, notify: { ...draft.notify, [k]: on } })))}
+        {NOTICES.map((k) => row(k === "admin_changes" ? "Действия администратора" : t(`telegram.notice.${k}`), k === "admin_changes" ? "Выдача, продление, изменение лимита, отключение подписки и закрытие заказа" : t("telegram.noticeSub"), draft.notify[k], (on) => setDraft({ ...draft, notify: { ...draft.notify, [k]: on } })))}
       </ul>
     </section>
   );
@@ -879,11 +881,11 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
   const text = screen === "orders" ? "🧾 Мои заказы\n\nНеоплаченных заказов нет." : screen === "help" ? "📖 Как подключиться\n\n1. Установите Happ или INCY.\n2. Откройте профиль → Мои подписки.\n3. Скопируйте ссылку выбранной подписки и добавьте её в приложение.\n4. Включите подключение. Устройства доступны в карточке подписки." : screen === "subscriptions" ? "📋 Мои подписки\nВыберите подписку" : screen === "devices" ? "📱 Устройства · 2 из 3\n\n1. iPhone · Happ\n2. Windows · INCY" : screen === "profile" ? t("telegram.sample.profile", { name: sample.name ?? "" }) : screen === "subscription" ? t("telegram.sample.subscriptions", { name: sample.name ?? "", term: sample.term ?? "", traffic: sample.traffic ?? "" }) + "\n\n🔗 Ссылка для подключения\nhttps://subs.example.com/A7b2X9mQ4\n\nСкопируйте ссылку и добавьте её в Happ, INCY или другое VPN-приложение." : mainText;
   const reduce = useReducedMotion();
   const rows: MenuButton[][] = [];
-  const previewButtons: MenuButton[] = screen === "orders" || screen === "help" ? [{id:"profile",action:"profile",label:"👤 Профиль",on:true,row:false},{id:"home",action:"page",label:"← Главное меню",on:true,row:false}] : screen === "devices" ? [{id:"device-one",action:"page",label:"📱 iPhone · Happ",on:true,row:false},{id:"device-two",action:"page",label:"📱 Windows · INCY",on:true,row:false},{id:"clear-all",action:"page",label:"🧹 Очистить все",on:true,row:false},{id: "subscription", action: "page", label: "← Подписка", on: true, row: false}] : screen === "profile" ? [{id: "subscriptions", action: "page", label: "📋 Мои подписки", on: true, row: false}, {id:"orders",action:"page",label:"🧾 Мои заказы",on:true,row:false}, {id: "home", action: "page", label: "← Главное меню", on: true, row: false}] : screen === "subscriptions" ? [{id: "subscription", action: "page", label: "🔑 A7b2X9mQ4", on: true, row: false}, {id: "profile", action: "profile", label: "← Профиль", on: true, row: false}] : screen === "subscription" ? [{id: "devices", action: "devices", label: "📱 Устройства (2)", on: true, row: false}, {id: "subscriptions", action: "page", label: "← Мои подписки", on: true, row: false}] : draft.buttons;
+  const previewButtons: MenuButton[] = screen === "help" ? [{id:"happ-ios",action:"url",label:"📲 Happ · iOS",on:true,row:false},{id:"happ-android",action:"url",label:"🤖 Happ · Android",on:true,row:false},{id:"incy-android",action:"url",label:"🤖 INCY · Android",on:true,row:false},{id:"home",action:"page",label:"← Меню",on:true,row:false}] : screen === "orders" ? [{id:"profile",action:"profile",label:"👤 Профиль",on:true,row:false},{id:"home",action:"page",label:"← Главное меню",on:true,row:false}] : screen === "devices" ? [{id:"device-one",action:"page",label:"📱 iPhone · Happ",on:true,row:false},{id:"device-two",action:"page",label:"📱 Windows · INCY",on:true,row:false},{id:"clear-all",action:"page",label:"🧹 Очистить все",on:true,row:false},{id: "subscription", action: "page", label: "← Подписка", on: true, row: false}] : screen === "profile" ? [{id: "subscriptions", action: "page", label: "📋 Мои подписки", on: true, row: false}, {id:"orders",action:"page",label:"🧾 Мои заказы",on:true,row:false}, {id: "home", action: "page", label: "← Главное меню", on: true, row: false}] : screen === "subscriptions" ? [{id: "subscription", action: "page", label: "🔑 A7b2X9mQ4", on: true, row: false}, {id: "profile", action: "profile", label: "← Профиль", on: true, row: false}] : screen === "subscription" ? [{id: "devices", action: "devices", label: "📱 Устройства (2)", on: true, row: false}, {id: "subscriptions", action: "page", label: "← Мои подписки", on: true, row: false}] : draft.buttons;
   for (const b of previewButtons) {
     if (!b.on || (b.action === "support" && !support) || (b.action === "app" && !(draft.mini_app && v.mini_app_url))) continue;
     const last = rows[rows.length - 1];
-    if (last && last.length < 2) last.push(b);
+    if (last && last.length < 2 && !(screen === "help" && (b.id === "incy-android" || b.id === "home"))) last.push(b);
     else rows.push([b]);
   }
   if (screen === "main" && draft.admin.enabled) { const admin: MenuButton = {id: "admin-preview", action: "page", label: "⚙️ Админ-панель · только ваш ID", on: true, row: false}; const last = rows[rows.length - 1]; if (last && last.length < 2) last.push(admin); else rows.push([admin]); }
@@ -899,6 +901,7 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
         {(["main", "profile", "subscriptions"] as const).map((item) => <button type="button" key={item} className="chip-btn" aria-pressed={screen === item} onClick={() => setScreen(item)}>{item === "subscriptions" ? "Мои подписки" : t(`telegram.previewScreens.${item}`)}</button>)}
       </div>
       <div className="tg-chat">
+        {v.banner_preview?<img src={v.banner_preview} alt="Баннер" className="w-full rounded-t-xl mb-1"/>:null}
         <div className="tg-bubble"><TelegramText text={text} /></div>
         <motion.div className="tg-keyboard" layout={!reduce} transition={slide}>
           <AnimatePresence initial={false} mode="popLayout">
@@ -933,7 +936,7 @@ function Preview({ draft, v }: { draft: Config; v: View }) {
   );
 }
 
-function AdminMenuCard({draft,setDraft}:{draft:Config;setDraft:(c:Config)=>void}) {
+function AdminMenuCard({draft,setDraft,v}:{draft:Config;setDraft:(c:Config)=>void;v:View}) {
  const reduce=useReducedMotion();const buttons=(draft.admin.buttons ?? []).filter(b=>b.action!=="grant");
  const update=(next:typeof buttons)=>setDraft({...draft,admin:{...draft.admin,buttons:next,version:3,users:next.some(b=>b.action==="users"&&b.on),subscriptions:next.some(b=>b.action==="subscriptions"&&b.on),search:false}});
  const change=(id:string,values:Partial<(typeof buttons)[number]>)=>update(buttons.map(b=>b.id===id?{...b,...values}:b));
@@ -942,13 +945,23 @@ function AdminMenuCard({draft,setDraft}:{draft:Config;setDraft:(c:Config)=>void}
  return <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"><section className="card glass"><div className="flex items-center gap-3 mb-4"><h2 className="card-title flex-1">Админ-меню</h2><Switch checked={draft.admin.enabled} label="Админ-меню" onChange={enabled=>setDraft({...draft,admin:{...draft.admin,enabled}})}/></div><p className="card-sub mb-4">Перетаскивайте кнопки за маркер. Кнопки располагаются по две в ряд. Изменения сохраняются кнопкой «Сохранить».</p>
  <Reorder.Group axis="y" values={buttons.map(b=>b.id)} onReorder={ids=>update(ids.map(id=>buttons.find(b=>b.id===id)!))} className="flex flex-col gap-2"><AnimatePresence initial={false}>{buttons.map((b)=><MenuReorderItem key={b.id} id={b.id} reduce={!!reduce}><div className="flex items-center gap-2"><Switch checked={b.on} label={b.label} onChange={on=>change(b.id,{on})}/><input className="input min-w-0 flex-1" maxLength={40} value={b.label} onChange={e=>change(b.id,{label:e.target.value})} aria-label="Название кнопки"/><button type="button" className="icon-btn menu-drag-handle" data-menu-drag style={{touchAction:"none"}} aria-label="Перетащить кнопку"><GripVertical size={18}/></button><button type="button" className="icon-btn" aria-label="Удалить кнопку" onClick={()=>update(buttons.filter(item=>item.id!==b.id))}><Trash2 size={16}/></button></div></MenuReorderItem>)}</AnimatePresence></Reorder.Group>
  <div className="flex flex-wrap gap-2 mt-3">{(["users","subscriptions","orders","broadcast","maintenance","refresh"] as const).filter(action=>!buttons.some(b=>b.action===action)).map(action=><button type="button" className="chip-btn" key={action} onClick={()=>update([...buttons,{id:action,action,label:labels[action],on:true,row:false}])}>+ {labels[action]}</button>)}</div><div className="flex items-center gap-3 mt-5"><span>Выдавать подписку в профиле пользователя</span><Switch checked={draft.admin.grant} label="Выдача подписки" onChange={grant=>setDraft({...draft,admin:{...draft.admin,grant}})}/></div><div className="flex items-center gap-3 mt-5"><span>Статистика в шапке</span><Switch checked={draft.admin.statistics} label="Статистика" onChange={statistics=>setDraft({...draft,admin:{...draft.admin,statistics}})}/></div></section>
- <section className="card glass"><h2 className="card-title mb-3">Превью · только ваш Telegram ID</h2><div className="tg-chat"><div className="tg-bubble">{"⚙️ Админ-панель Mirai\n\nУправление пользователями и подписками"}{draft.admin.statistics?"\nПользователи: 18 · Заблокированы: 1\nКлючи: 24 · Активные: 20\nЗаказы: 32 · Ожидают оплаты: 2":""}</div><div className="tg-keyboard">{draft.admin.enabled?rows.map(row=><div className="tg-row" key={row[0]!.id}>{row.map(b=><button type="button" className="tg-btn" key={b.id}>{b.label}{b.action === "users" && b.id !== "home-preview" ? " (18)" : b.action === "subscriptions" ? " (24)" : b.action === "orders" ? " (2)" : ""}</button>)}</div>):<div className="tg-bubble">Админ-меню отключено</div>}</div></div></section></div>;
+ <section className="card glass"><h2 className="card-title mb-3">Превью · только ваш Telegram ID</h2><div className="tg-chat">{v.banner_preview?<img src={v.banner_preview} alt="Баннер" className="w-full rounded-t-xl mb-1"/>:null}<div className="tg-bubble">{"⚙️ Админ-панель Mirai\n\nУправление пользователями и подписками"}{draft.admin.statistics?"\nПользователи: 18 · Заблокированы: 1\nКлючи: 24 · Активные: 20\nЗаказы: 32 · Ожидают оплаты: 2":""}</div><div className="tg-keyboard">{draft.admin.enabled?rows.map(row=><div className="tg-row" key={row[0]!.id}>{row.map(b=><button type="button" className="tg-btn" key={b.id}>{b.label}{b.action === "users" && b.id !== "home-preview" ? " (18)" : b.action === "subscriptions" ? " (24)" : b.action === "orders" ? " (2)" : ""}</button>)}</div>):<div className="tg-bubble">Админ-меню отключено</div>}</div></div></section></div>;
 }
 
 function DeviceResetCard({v}: {v: View}) {
  const {draft, setDraft, dirty} = useDraft(v.device_reset);
  const patch = usePatchTelegram(); const toast = useToast();
  return <section className="card glass mt-4"><h2 className="card-title">Очистка устройств</h2><p className="card-sub">Общий лимит для каждой подписки. Для администратора — без ограничений. Очистка всех устройств считается одной операцией.</p><div className="grid gap-4 mt-4 md:grid-cols-2"><div className="flex items-center gap-3"><span>По одному устройству</span><Switch checked={draft.single} label="Очистка по одному" onChange={single => setDraft({...draft, single})}/></div><div className="flex items-center gap-3"><span>Все устройства сразу</span><Switch checked={draft.all} label="Очистка всех устройств" onChange={all => setDraft({...draft, all})}/></div><Field label="Количество очисток"><input className="input" type="number" min={1} max={1000} value={draft.limit} onChange={e => setDraft({...draft, limit: Number(e.target.value)})}/></Field><Field label="Период в днях"><input className="input" type="number" min={1} max={365} value={draft.period_days} onChange={e => setDraft({...draft, period_days: Number(e.target.value)})}/></Field></div><p className="card-sub mt-3">Например: 4 очистки за 30 дней. Каждая использованная очистка снова доступна через этот период.</p><Button className="mt-3" disabled={!dirty || patch.isPending || draft.limit < 1 || draft.limit > 1000 || draft.period_days < 1 || draft.period_days > 365} onClick={() => patch.mutate({device_reset: draft}, {onSuccess: () => toast.ok(t("telegram.saved")), onError: e => toast.error(errorText(e))})}>Сохранить лимиты</Button></section>;
+}
+
+function BannerCard({v}:{v:View}) {
+ const patch=usePatchTelegram();const toast=useToast();
+ const upload=(file?:File)=>{
+  if(!file)return;
+  if(!["image/png","image/jpeg"].includes(file.type)||file.size>512*1024){toast.error("Выберите PNG или JPEG до 512 КБ");return;}
+  const reader=new FileReader();reader.onerror=()=>toast.error("Не удалось прочитать изображение");reader.onload=()=>patch.mutate({banner_image:String(reader.result)},{onSuccess:()=>toast.ok("Баннер сохранён"),onError:e=>toast.error(errorText(e))});reader.readAsDataURL(file);
+ };
+ return <section className="card glass mt-4"><h2 className="card-title">Баннер бота</h2><p className="card-sub mt-2">Одно изображение на всех экранах пользователя и администратора. PNG или JPEG до 512 КБ. Сначала подключите бота, сохраните свой Telegram ID и отправьте ему /start.</p>{v.banner_preview?<img src={v.banner_preview} alt="Баннер бота" className="mt-4 rounded-xl w-full max-w-lg"/>:null}<div className="flex items-center gap-3 mt-4"><label className="btn btn-primary cursor-pointer">{patch.isPending?"Загрузка…":"Загрузить изображение"}<input type="file" className="sr-only" accept="image/png,image/jpeg" disabled={patch.isPending||!v.token_set||!v.admin_id} onChange={e=>{upload(e.target.files?.[0]);e.target.value="";}}/></label>{v.banner_preview?<Button variant="danger" disabled={patch.isPending} onClick={()=>patch.mutate({banner_image:""},{onSuccess:()=>toast.ok("Баннер удалён"),onError:e=>toast.error(errorText(e))})}>Удалить</Button>:null}</div></section>;
 }
 
 function MaintenanceCard({v}:{v:View}) {

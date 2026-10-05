@@ -106,7 +106,7 @@ func (b *Bot) shopList(ctx context.Context, w *words, title, prefix, notice stri
 	if len(offers) == 0 {
 		lines = append(lines, html.EscapeString(w.payUnavailable))
 	}
-	return strings.Join(lines, "\n"), &Keyboard{append(rows, back)}
+	return strings.Join(lines, "\n"), &Keyboard{InlineKeyboard: append(rows, back)}
 }
 
 // cheapest is the price a list shows: rubles when sold for them, else Stars; "from" the
@@ -172,7 +172,7 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 				label := billing.TermLabel(o.Tariff, t.Days, lang) + " · " + w.cheapest(billing.Offer{Stars: t.Stars, Rub: t.Rub})
 				rows = append(rows, []Button{{Text: label, CallbackData: prefix + ":" + ref + "." + strconv.FormatInt(t.Days, 10)}})
 			}
-			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + "\n\n" + w.pickTerm, &Keyboard{append(rows, back)}
+			return name + html.EscapeString(billing.DescribeLimits(o.Tariff, lang)) + "\n\n" + w.pickTerm, &Keyboard{InlineKeyboard: append(rows, back)}
 		}
 		t, ok := o.Term(days)
 		if !ok {
@@ -183,9 +183,9 @@ func (b *Bot) shopTariff(ctx context.Context, w *words, arg, prefix, pay string,
 		}
 		text := name + html.EscapeString(billing.Describe(o.Tariff, t.Days, lang)) + "\n\n" + w.payHow
 		rows := w.payButtons(pay+":"+ref+":", t.Stars, t.Rub, av, b.addonName(ctx))
-		return text, &Keyboard{append(rows, back)}
+		return text, &Keyboard{InlineKeyboard: append(rows, back)}
 	}
-	return html.EscapeString(w.notForSale), &Keyboard{[][]Button{back}}
+	return html.EscapeString(w.notForSale), &Keyboard{InlineKeyboard: [][]Button{back}}
 }
 
 // shopBack is where the back button of a tariff screen leads: the term list of a tariff
@@ -204,11 +204,11 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 	id, days := tariffArg(ref)
 	provider, ok := providerOf(code)
 	if !ok || b.d.Billing == nil {
-		return html.EscapeString(w.payUnavailable), &Keyboard{[][]Button{back}}
+		return html.EscapeString(w.payUnavailable), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	p, err := b.d.Billing.Invoice(ctx, billing.InvoiceRequest{TgID: chat, UserID: userID, TariffID: id, TermDays: days, Provider: provider})
 	if err != nil {
-		return html.EscapeString(w.payError(err)), &Keyboard{[][]Button{back}}
+		return html.EscapeString(w.payError(err)), &Keyboard{InlineKeyboard: [][]Button{back}}
 	}
 	done := w.payNew
 	if userID != 0 {
@@ -222,7 +222,7 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 		}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(name), html.EscapeString(w.price(p.Amount, p.Currency)), done)
-	return text, &Keyboard{[][]Button{
+	return text, &Keyboard{InlineKeyboard: [][]Button{
 		{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}, {Text: "✅ Проверить оплату", CallbackData: "ordercheck:" + strconv.FormatInt(p.ID, 10)}},
 		{{Text: "🧾 Мои заказы", CallbackData: "orders"}, {Text: "🗑 Закрыть заказ", CallbackData: "orderclose:" + strconv.FormatInt(p.ID, 10)}}, back}}
 }
@@ -354,7 +354,7 @@ func (b *Bot) Paid(ctx context.Context, p db.Payment, u db.User, created bool) {
 // takeTrial gives the chat its free trial and says what it got; a chat that had one (or
 // is a customer) is told why not.
 func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *Keyboard) {
-	home := &Keyboard{[][]Button{{{Text: w.back, CallbackData: "m"}}}}
+	home := &Keyboard{InlineKeyboard: [][]Button{{{Text: w.back, CallbackData: "m"}}}}
 	if b.d.Billing == nil {
 		return html.EscapeString(w.trialOff), home
 	}
@@ -372,5 +372,5 @@ func (b *Bot) takeTrial(ctx context.Context, w *words, chat int64) (string, *Key
 	if t, err := b.d.Store.Q.GetTariff(ctx, u.TariffID.Int64); err == nil {
 		what = billing.Describe(t, t.DurationDays, b.lang(ctx))
 	}
-	return fmt.Sprintf(html.EscapeString(w.trialDone), html.EscapeString(what)), &Keyboard{[][]Button{{{Text: w.trialOpen, CallbackData: "u:" + strconv.FormatInt(u.ID, 10)}}}}
+	return fmt.Sprintf(html.EscapeString(w.trialDone), html.EscapeString(what)), &Keyboard{InlineKeyboard: [][]Button{{{Text: w.trialOpen, CallbackData: "u:" + strconv.FormatInt(u.ID, 10)}}}}
 }

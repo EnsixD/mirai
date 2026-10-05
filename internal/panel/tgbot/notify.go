@@ -174,7 +174,7 @@ func (b *Bot) Notify(ctx context.Context) {
 				"expired": pick(cfg.Texts.Expired, w.expired), "traffic_90": pick(cfg.Texts.Traffic90, w.traffic90), "traffic_100": pick(cfg.Texts.TrafficEnd, w.trafficEnd)}[n.kind], vars)
 			var kb *Keyboard
 			if n.kind != "traffic_90" {
-				kb = &Keyboard{[][]Button{{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}}}}
+				kb = &Keyboard{InlineKeyboard: [][]Button{{{Text: labelOf(cfg, "renew", "💳"), CallbackData: "r"}}}}
 			}
 			chat, userID := l.TgID, u.ID
 			out.Notice(chat, func(ctx context.Context, c *Client) error {

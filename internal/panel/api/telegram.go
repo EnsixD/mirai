@@ -23,6 +23,7 @@ import (
 // TelegramView is the bot as the admin panel shows it. The token itself never leaves
 // the panel.
 type TelegramView struct {
+	BannerPreview  string                   `json:"banner_preview" doc:"Uploaded banner preview; empty until the administrator uploads an image"`
 	Maintenance    bool                     `json:"maintenance" doc:"Технические работы: пользовательское меню временно недоступно"`
 	DeviceReset    domain.DeviceResetPolicy `json:"device_reset"`
 	Enabled        bool                     `json:"enabled"`
@@ -67,6 +68,7 @@ type telegramOutput struct{ Body TelegramView }
 
 type patchTelegramInput struct {
 	Body struct {
+		BannerImage    *string                        `json:"banner_image,omitempty" maxLength:"720000" doc:"PNG/JPEG data URL up to 512 KB; empty removes the banner"`
 		Maintenance    *bool                          `json:"maintenance,omitempty"`
 		DeviceReset    *domain.DeviceResetPolicy      `json:"device_reset,omitempty"`
 		Enabled        *bool                          `json:"enabled,omitempty"`
@@ -129,9 +131,10 @@ func (h *handlers) disconnectInfrastructureAdmin(ctx context.Context, _ *struct{
 }
 
 func (h *handlers) registerTelegram() {
+	h.registerTelegramBanner()
 	tags := []string{"telegram"}
 	huma.Register(h.api, huma.Operation{OperationID: "get-telegram", Method: http.MethodGet, Path: "/api/v1/telegram", Summary: "Telegram-бот", Tags: tags}, h.getTelegram)
-	huma.Register(h.api, huma.Operation{OperationID: "update-telegram", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/telegram", Summary: "Настроить Telegram-бота", Tags: tags}, h.updateTelegram)
+	huma.Register(h.api, huma.Operation{OperationID: "update-telegram", MaxBodyBytes: 1 << 20, Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/telegram", Summary: "Настроить Telegram-бота", Tags: tags}, h.updateTelegram)
 	huma.Register(h.api, huma.Operation{OperationID: "telegram-broadcast", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/telegram/broadcast", Summary: "Разослать сообщение всем в боте", Tags: tags, DefaultStatus: http.StatusAccepted}, h.broadcast)
 	huma.Register(h.api, huma.Operation{OperationID: "telegram-infrastructure-connect", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/telegram/infrastructure/connect", Summary: "Подключить чат администратора для уведомлений", Tags: tags}, h.connectInfrastructureAdmin)
 	huma.Register(h.api, huma.Operation{OperationID: "telegram-infrastructure-disconnect", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodDelete, Path: "/api/v1/telegram/infrastructure/connect", Summary: "Отключить чат администратора для уведомлений", Tags: tags, DefaultStatus: http.StatusNoContent}, h.disconnectInfrastructureAdmin)
@@ -141,6 +144,7 @@ func (h *handlers) registerTelegram() {
 func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 	var v TelegramView
 	var err error
+	v.BannerPreview = h.bannerPreviewURL(ctx)
 	v.Maintenance, _, err = settings.Get[bool](ctx, h.d.Settings, tgbot.KeyMaintenance)
 	if err != nil {
 		return v, err
@@ -301,12 +305,41 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 		return nil, tgFieldErr("enabled", "tg_no_token")
 	}
 
+	bannerID := ""
+	if b.BannerImage != nil && *b.BannerImage != "" {
+		if b.Token != nil || b.Route != nil || b.AdminID != nil {
+			return nil, tgFieldErr("banner_image", "Save bot connection and administrator ID before uploading")
+		}
+		bannerID, err = h.d.Telegram.UploadBanner(ctx, *b.BannerImage)
+		if err != nil {
+			return nil, tgFieldErr("banner_image", err.Error())
+		}
+	}
 	// One transaction: a token saved without the route that reaches it, or a route without
 	// the switch that turns the bot on, is a bot that does not start. The alerts' settings
 	// are merged into what the transaction reads, so two PATCHes at once do not undo each
 	// other's fields (a serialization conflict merges again).
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
+		if b.BannerImage != nil {
+			if err := settings.Set(ctx, set, tgbot.KeyBanner, bannerID); err != nil {
+				return err
+			}
+			if err := settings.Set(ctx, set, tgbot.KeyBannerPreview, *b.BannerImage); err != nil {
+				return err
+			}
+			details["banner"] = bannerID != ""
+		} else if b.Token != nil && *b.Token != "" {
+			previous, _ := set.String(ctx, tgbot.KeyToken)
+			if previous != *b.Token {
+				if err := settings.Set(ctx, set, tgbot.KeyBanner, ""); err != nil {
+					return err
+				}
+				if err := settings.Set(ctx, set, tgbot.KeyBannerPreview, ""); err != nil {
+					return err
+				}
+			}
+		}
 		if b.Maintenance != nil {
 			if err := settings.Set(ctx, set, tgbot.KeyMaintenance, *b.Maintenance); err != nil {
 				return err

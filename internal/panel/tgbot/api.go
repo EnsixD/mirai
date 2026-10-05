@@ -174,12 +174,17 @@ type Chat struct {
 }
 
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	From      *User  `json:"from"`
-	Chat      Chat   `json:"chat"`
-	Text      string `json:"text"`
+	Photo     []PhotoSize `json:"photo,omitempty"`
+	MessageID int64       `json:"message_id"`
+	From      *User       `json:"from"`
+	Chat      Chat        `json:"chat"`
+	Text      string      `json:"text"`
 	// SuccessfulPayment: a Stars invoice was paid (a service message from Telegram).
 	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
+}
+
+type PhotoSize struct {
+	FileID string `json:"file_id"`
 }
 
 type CallbackQuery struct {
@@ -210,10 +215,16 @@ type WebApp struct {
 
 type Keyboard struct {
 	InlineKeyboard [][]Button `json:"inline_keyboard"`
+	KeepRows       bool       `json:"-"`
 }
 
 // MarshalJSON keeps every bot screen compact without changing button order or actions.
 func (k Keyboard) MarshalJSON() ([]byte, error) {
+	if k.KeepRows {
+		return json.Marshal(struct {
+			Rows [][]Button `json:"inline_keyboard"`
+		}{k.InlineKeyboard})
+	}
 	rows := make([][]Button, 0)
 	for _, row := range k.InlineKeyboard {
 		for _, button := range row {

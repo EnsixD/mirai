@@ -577,7 +577,7 @@ func (b *Bot) freshMenu(out *Outbox, chat int64, notice string) {
 
 func (b *Bot) sendMenu(ctx context.Context, c *Client, chat int64, notice string) error {
 	text, kb := b.screen(ctx, b.Config(ctx), chat, "m", notice)
-	sent, err := c.Send(ctx, chat, text, kb, false)
+	sent, err := b.sendScreen(ctx, c, chat, text, kb)
 	if err != nil {
 		return err
 	}
@@ -614,7 +614,8 @@ func (b *Bot) onPress(ctx context.Context, c *Client, out *Outbox, q *CallbackQu
 	data, notice := b.act(ctx, chat, q.Data)
 	out.Reply(chat, "edit:"+strconv.FormatInt(chat, 10)+":"+strconv.FormatInt(msg, 10), 1, func(ctx context.Context, c *Client) error {
 		text, kb := b.screen(ctx, b.Config(ctx), chat, data, notice)
-		if err := c.Edit(ctx, chat, msg, text, kb); err != nil {
+		edited, err := b.editScreen(ctx, c, q.Message, text, kb)
+		if err != nil {
 			var ae *APIError
 			if errors.As(err, &ae) && ae.Code == 429 {
 				return err
@@ -622,7 +623,7 @@ func (b *Bot) onPress(ctx context.Context, c *Client, out *Outbox, q *CallbackQu
 			// Too old to edit, or gone: a new menu instead.
 			return b.sendMenu(ctx, c, chat, notice)
 		}
-		_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: msg, TgID: chat})
+		_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: edited, TgID: chat})
 		return nil
 	})
 }
@@ -739,7 +740,7 @@ func (b *Bot) askOwner(ctx context.Context, out *Outbox, w *words, chat int64, n
 	b.mu.Unlock()
 	text := html.EscapeString(fmt.Sprintf(w.transferAsk, u.Name, name))
 	data := strconv.FormatInt(u.ID, 10) + ":" + strconv.FormatInt(chat, 10)
-	kb := &Keyboard{[][]Button{{{Text: w.transferAllow, CallbackData: "ta:" + data}, {Text: w.transferDeny, CallbackData: "tx:" + data}}}}
+	kb := &Keyboard{InlineKeyboard: [][]Button{{{Text: w.transferAllow, CallbackData: "ta:" + data}, {Text: w.transferDeny, CallbackData: "tx:" + data}}}}
 	out.Notice(owner, func(ctx context.Context, c *Client) error {
 		_, err := c.Send(ctx, owner, text, kb, false)
 		return err

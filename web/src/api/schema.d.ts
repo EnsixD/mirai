@@ -949,6 +949,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telegram/banner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Private Telegram banner preview */
+        get: operations["telegram-banner-preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/telegram/broadcast": {
         parameters: {
             query?: never;
@@ -1989,6 +2006,8 @@ export interface components {
             version: string;
         };
         Notify: {
+            /** @description Уведомлять о выдаче и изменениях подписки администратором */
+            admin_changes: boolean;
             expire_1d: boolean;
             expire_3d: boolean;
             expired: boolean;
@@ -2198,6 +2217,8 @@ export interface components {
         PatchTelegramInputBody: {
             /** Format: int64 */
             admin_id?: number;
+            /** @description PNG/JPEG data URL up to 512 KB; empty removes the banner */
+            banner_image?: string;
             config?: components["schemas"]["Config"];
             device_reset?: components["schemas"]["DeviceResetPolicy"];
             enabled?: boolean;
@@ -2797,6 +2818,8 @@ export interface components {
              * @description Telegram ID владельца админ-меню; 0 — выключено
              */
             admin_id: number;
+            /** @description Uploaded banner preview; empty until the administrator uploads an image */
+            banner_preview: string;
             bot?: components["schemas"]["TelegramBot"];
             /** @description Последняя рассылка с запуска панели */
             broadcast?: components["schemas"]["TelegramBroadcast"];
@@ -5442,6 +5465,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "telegram-banner-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Banner image */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                    "image/png": unknown;
                 };
             };
             /** @description Error */
