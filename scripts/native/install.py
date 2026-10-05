@@ -86,8 +86,17 @@ def main():
     if args.repair_existing and Path('/etc/mirai/mirai.env').exists():
         existing = dict(line.split('=', 1) for line in Path('/etc/mirai/mirai.env').read_text().splitlines() if '=' in line)
     if not args.yes and not args.join:
-        args.domain = args.domain or input('Panel domain (optional): ').strip()
-        args.lang = input('Language [en/ru, default en]: ').strip() or 'en'
+        try:
+            terminal = open('/dev/tty', 'r+')
+        except OSError:
+            raise SystemExit('No interactive terminal: use --yes --lang en --domain vpn.example.com')
+        with terminal:
+            if not args.domain:
+                terminal.write('Panel domain (optional): '); terminal.flush()
+                args.domain = terminal.readline().strip()
+            terminal.write('Language [en/ru, default en]: '); terminal.flush()
+            args.lang = terminal.readline().strip() or 'en'
+        if args.lang not in ('en', 'ru'): raise SystemExit('Language must be en or ru')
     host = args.public_host
     if not args.join and not host:
         with urllib.request.urlopen('https://api.ipify.org', timeout=15) as response:
@@ -111,6 +120,8 @@ def main():
     Path('/var/lib/mirai/update').mkdir(parents=True, exist_ok=True)
     run('chown', '-R', 'mirai:mirai', '/var/lib/mirai')
     Path('/etc/mirai').mkdir(exist_ok=True)
+    Path('/etc/mirai').chmod(0o750)
+    run('chown', 'root:mirai', '/etc/mirai')
     # Ed25519 SubjectPublicKeyInfo prefix, followed by the raw trusted public key.
     der = bytes.fromhex('302a300506032b6570032100') + base64.b64decode(PUBLIC_KEY)
     pem = '-----BEGIN PUBLIC KEY-----\n' + base64.b64encode(der).decode() + '\n-----END PUBLIC KEY-----\n'
@@ -134,8 +145,10 @@ def main():
             # Only explicit regular files are extracted; no paths, links or devices.
             for member in bundle.getmembers():
                 target = Path('/opt/mirai') / member.name
-                target.write_bytes(bundle.extractfile(member).read())
-                target.chmod(0o644 if member.name == 'VERSION' else 0o755)
+                pending = target.with_name(target.name + '.new')
+                pending.write_bytes(bundle.extractfile(member).read())
+                pending.chmod(0o644 if member.name == 'VERSION' else 0o755)
+                pending.replace(target)
         if Path('/opt/mirai/VERSION').read_text().strip() != manifest['version']:
             raise SystemExit('Archive version mismatch')
         for name in ['update.py']:
@@ -162,6 +175,7 @@ def main():
         run('/opt/mirai/mirai-node', 'key-port', env={**os.environ, **env}, stdout=subprocess.DEVNULL)
     else:
         credentials = run('/opt/mirai/mirai', 'admin', 'bootstrap', '--username', 'admin', '--public-host', host, '--port', '443' if args.domain else '80', '--domain', args.domain, '--lang', args.lang, env={**os.environ, **env}, capture_output=True, text=True).stdout
+        if not args.domain: credentials = credentials.replace('https://', 'http://')
         credential_path = args.credentials_file or '/root/mirai-login.txt'
         write(credential_path, credentials, 0o600)
         service('mirai', '/opt/mirai/mirai serve', 192)
@@ -219,7 +233,8 @@ set -a
 . /etc/mirai/mirai.env
 set +a
 case "$1" in
- status) exec systemctl status mirai mirai-node --no-pager ;;
+ logs) shift; if [ "$1" = node ]; then shift; exec journalctl -u mirai-node "$@"; else exec journalctl -u mirai "$@"; fi ;;
+ status) if [ -n "$MIRAI_DATABASE_URL" ]; then exec systemctl status mirai mirai-node --no-pager; else exec systemctl status mirai-node --no-pager; fi ;;
  update) exec python3 /opt/mirai/update.py ;;
  *) exec /opt/mirai/mirai "$@" ;;
 esac
@@ -237,6 +252,7 @@ esac
             if subprocess.run(['/opt/mirai/mirai', 'health'], env={**os.environ, **env}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0: break
             time.sleep(1)
         else: raise SystemExit('Panel did not become healthy; check journalctl -u mirai')
+        if not args.domain: print('No domain configured: choose a REALITY camouflage target explicitly before publishing inbounds.')
         print('Mirai installed successfully. Credentials saved to ' + credential_path)
         if not args.credentials_file: print(credentials)
     else:

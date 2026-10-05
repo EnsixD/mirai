@@ -77,7 +77,9 @@ try:
             members = bundle.getmembers()
             if {m.name for m in members} != {'mirai', 'mirai-node', 'VERSION'} or not all(m.isfile() for m in members):
                 raise ValueError('Unexpected native archive contents')
-            bundle.extractall(work / 'new', filter='data')
+            (work / 'new').mkdir()
+            for member in members:
+                (work / 'new' / member.name).write_bytes(bundle.extractfile(member).read())
         if (work / 'new/VERSION').read_text().strip() != version:
             raise ValueError('Native archive version mismatch')
         environment = {}
@@ -127,7 +129,7 @@ except Exception as error:
         for name in ('mirai', 'mirai-node', 'VERSION', 'update.py'):
             shutil.copy2(backup / name, ROOT / name)
         if (backup / 'database.dump').exists():
-            run('pg_restore', '--clean', '--if-exists', '--no-owner', '--exit-on-error', '-d', pg['PGDATABASE'], str(backup / 'database.dump'), env=pg)
+            subprocess.run(['pg_restore', '--clean', '--if-exists', '--no-owner', '--exit-on-error', '-d', pg['PGDATABASE'], str(backup / 'database.dump')], env=pg, check=False)
         run('systemctl', 'start', *services)
     write_status('failed', version, previous, type(error).__name__ + ': update failed; see systemd journal')
     raise

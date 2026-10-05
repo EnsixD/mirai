@@ -51,7 +51,7 @@ jobs:
           go test ./... -run '^$'
           go test ./internal/release ./internal/panel/server ./internal/panel/settings
           go test ./internal/panel/billing -run '^TestTrial(OncePerAccount|AlsoAvailableToExistingAccounts|TapsAtOnce|OnAnArchivedTariff|OnATariffWithoutTerm|IsTheTariffWhole)$'
-          go test ./internal/panel/domain -run '^Test(ShortSubscriptionTokens|DeviceResetQuota|TariffDeletePreservesSubscriptionsAndReceipts)$'
+          go test ./internal/panel/domain -run '^Test(LocalRealityOwnDomain|BoundDeviceTraffic|ShortSubscriptionTokens|DeviceResetQuota|TariffDeletePreservesSubscriptionsAndReceipts)$'
           go test ./internal/panel/tgbot -run '^Test(MenuStructureAndDeletion|AdminButtonsPreserveRowsAndDeletion|CustomerProfilePurchaseTotals)$'
           go test ./internal/panel/api -run '^TestTelegramVisitorsAppearWithoutSubscriptions$'
           go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'

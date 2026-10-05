@@ -34,3 +34,5 @@ Thumbs.db
 
 # compiler cache
 *.tsbuildinfo
+__pycache__/
+*.pyc

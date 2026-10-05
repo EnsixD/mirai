@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
     'notes': {
-        'ru': 'Нативная Mirai: панель и нода без Docker. Подписанные обновления с резервной копией и откатом.',
-        'en': 'Native Mirai panel and node without Docker. Signed updates with backup and rollback.',
+        'ru': 'Mirai: трафик устройств, публичный сайт для REALITY, удаление устаревших протоколов и платежей. Защита UDP и настройка XHTTP.',
+        'en': 'Device traffic, a public REALITY cover website, retired protocol and payment cleanup, UDP safety and synchronized XHTTP settings.',
     },
 }
 for arch in ['x86_64', 'aarch64']:
