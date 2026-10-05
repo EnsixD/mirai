@@ -42,6 +42,14 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 		if !strings.Contains(r.Header.Get("Content-Type"), "multipart") {
 			var payload map[string]json.RawMessage
 			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if method == "sendPhoto" || method == "editMessageCaption" {
+				if string(payload["caption"]) == "\"\"" || len(payload["caption"]) == 0 {
+					t.Error("screen photo must carry text")
+				}
+				if len(payload["reply_markup"]) == 0 {
+					t.Error("screen photo must carry buttons")
+				}
+			}
 			if method == "sendPhoto" || method == "editMessageMedia" {
 				if v, ok := payload["reply_markup"]; ok && string(v) == "null" {
 					t.Error("nil reply_markup must be omitted")
@@ -95,8 +103,8 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 		t.Fatal("instruction must be 2,1,1", string(wire))
 	}
 	short, err := e.bot.sendScreen(e.ctx, client, 555, "<b>Profile</b>", keyboard)
-	if err != nil || len(short.Photo) != 0 {
-		t.Fatal("screen should edit the text beneath its persistent photo", err)
+	if err != nil || len(short.Photo) == 0 {
+		t.Fatal("screen should carry its caption and buttons on the photo", err)
 	}
 	initialHeader, _ := e.st.Q.TelegramBannerMessage(e.ctx, 555)
 	longText := strings.Repeat("Example ", 200)
@@ -108,7 +116,7 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 	if err != nil || header == 0 || longID != short.MessageID {
 		t.Fatal("long text banner not tracked", header, err)
 	}
-	// Persisted header state survives a bot restart and is removed when combining again.
+	// Persisted photo screen survives a restart; navigation edits its caption.
 	restarted := New(e.bot.d)
 	_, err = restarted.editScreen(e.ctx, client, &Message{MessageID: longID, Chat: Chat{ID: 555}}, "<b>Profile</b>", keyboard)
 	if err != nil {
@@ -117,6 +125,14 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 	header, _ = e.st.Q.TelegramBannerMessage(e.ctx, 555)
 	if header == 0 || header != initialHeader {
 		t.Fatal("persistent banner was removed")
+	}
+	// The existing standalone-photo layout is adopted without uploading another image.
+	if err := e.st.Q.SetTgMenu(e.ctx, db.SetTgMenuParams{TgID: 555, MenuMsgID: 999}); err != nil {
+		t.Fatal(err)
+	}
+	migratedID, err := restarted.editScreen(e.ctx, client, &Message{MessageID: 999, Chat: Chat{ID: 555}}, "Combined admin menu", keyboard)
+	if err != nil || migratedID != initialHeader {
+		t.Fatal("standalone header not adopted", err)
 	}
 	photos := 0
 	for _, method := range calls {
@@ -134,7 +150,7 @@ func TestBannerScreensAndInstructionRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	fallbackID, err := restarted.editScreen(e.ctx, client, &short, "Still works", keyboard)
-	if err != nil || fallbackID != short.MessageID {
+	if err != nil || fallbackID == 0 {
 		t.Fatal("banner failure blocked navigation", err)
 	}
 	if _, err := restarted.sendScreen(e.ctx, client, 555, "Start still works", keyboard); err != nil {

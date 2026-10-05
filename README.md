@@ -88,7 +88,7 @@ Configuration lives in `/etc/mirai/mirai.env`, runtime data in `/var/lib/mirai`,
 
 The bot runs inside the panel. Add a BotFather token and your numeric administrator ID in **Telegram**. Admin actions check that ID on every request.
 
-Upload a PNG or JPEG banner in Telegram settings. The banner stays above one editable screen while users navigate; long instructions are kept in full. Administrator actions notify the account owner about grants, extensions, device limits, access changes, and closed orders. These notices can be disabled in the panel.
+Upload a PNG or JPEG banner in Telegram settings. The photo, caption, and buttons share one message; navigation edits its caption in place. Screens exceeding Telegram’s caption limit fall back to full text without truncation. Administrator actions notify the account owner about grants, extensions, device limits, access changes, and closed orders. These notices can be disabled in the panel.
 
 ```text
 /start â†’ VPN description

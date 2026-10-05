@@ -101,64 +101,43 @@ func (b *Bot) clearBannerHeader(ctx context.Context, c *Client, chat int64) {
 	}
 }
 
-func (b *Bot) ensureBanner(ctx context.Context, c *Client, chat int64, photo string) (bool, error) {
-	header, _ := b.d.Store.Q.TelegramBannerMessage(ctx, chat)
-	if header != 0 {
-		old, _ := b.d.Store.Q.TelegramBannerFile(ctx, chat)
-		if old == photo {
-			return false, nil
-		}
-		if err := c.EditPhoto(ctx, chat, header, photo, "", nil); err == nil {
-			return false, b.d.Store.Q.SetTelegramBannerMessage(ctx, chat, header, photo)
-		} else {
-			var ae *APIError
-			if errors.As(err, &ae) && ae.Code == 429 {
-				return false, err
-			}
-		}
+// EditCaption changes only the text and buttons, retaining the existing photo.
+func (c *Client) EditCaption(ctx context.Context, chat, msg int64, text string, kb *Keyboard) error {
+	in := map[string]any{"chat_id": chat, "message_id": msg, "caption": text, "parse_mode": "HTML"}
+	if kb != nil {
+		in["reply_markup"] = kb
 	}
-	sent, err := c.SendPhoto(ctx, chat, photo, "", nil)
-	if err != nil {
-		return false, err
+	err := c.call(ctx, "editMessageCaption", in, nil)
+	var ae *APIError
+	if errors.As(err, &ae) && strings.Contains(ae.Description, "message is not modified") {
+		return nil
 	}
-	if err := b.d.Store.Q.SetTelegramBannerMessage(ctx, chat, sent.MessageID, photo); err != nil {
-		_ = c.Delete(ctx, chat, sent.MessageID)
-		return false, err
-	}
-	return true, nil
+	return err
 }
 
-// A persistent photo sits above the single editable screen message. This permits
-// arbitrary screen text length without Telegram's photo-caption limit.
 func (b *Bot) sendScreen(ctx context.Context, c *Client, chat int64, text string, kb *Keyboard) (Message, error) {
-	photo, _ := b.d.Settings.String(ctx, KeyBanner)
-	if photo == "" {
-		b.clearBannerHeader(ctx, c, chat)
-		return c.Send(ctx, chat, text, kb, false)
-	}
-	added, err := b.ensureBanner(ctx, c, chat, photo)
-	if err != nil {
-		return c.Send(ctx, chat, text, kb, false)
-	}
 	if current, err := b.d.Store.Q.GetTgChat(ctx, chat); err == nil && current.MenuMsgID != 0 {
-		if !added {
-			if err := c.Edit(ctx, chat, current.MenuMsgID, text, kb); err == nil {
-				return Message{MessageID: current.MenuMsgID, Chat: Chat{ID: chat}}, nil
-			} else {
-				var ae *APIError
-				if errors.As(err, &ae) && ae.Code == 429 {
-					return Message{}, err
-				}
-			}
-		}
-		sent, err := c.Send(ctx, chat, text, kb, false)
+		id, err := b.editScreen(ctx, c, &Message{MessageID: current.MenuMsgID, Chat: Chat{ID: chat}}, text, kb)
 		if err == nil {
-			_ = c.Delete(ctx, chat, current.MenuMsgID)
-			_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: sent.MessageID, TgID: chat})
+			return Message{MessageID: id, Chat: Chat{ID: chat}}, nil
 		}
-		return sent, err
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Code == 429 {
+			return Message{}, err
+		}
 	}
-	sent, err := c.Send(ctx, chat, text, kb, false)
+	photo, _ := b.d.Settings.String(ctx, KeyBanner)
+	var sent Message
+	var err error
+	if photo != "" {
+		sent, err = c.SendPhoto(ctx, chat, photo, text, kb)
+		if err == nil {
+			_ = b.d.Store.Q.SetTelegramBannerMessage(ctx, chat, sent.MessageID, photo)
+		}
+	}
+	if photo == "" || err != nil {
+		sent, err = c.Send(ctx, chat, text, kb, false)
+	}
 	if err == nil {
 		_ = b.d.Store.Q.SetTgMenu(ctx, db.SetTgMenuParams{MenuMsgID: sent.MessageID, TgID: chat})
 	}
@@ -168,22 +147,57 @@ func (b *Bot) sendScreen(ctx context.Context, c *Client, chat int64, text string
 func (b *Bot) editScreen(ctx context.Context, c *Client, m *Message, text string, kb *Keyboard) (int64, error) {
 	chat := m.Chat.ID
 	photo, _ := b.d.Settings.String(ctx, KeyBanner)
-	if photo == "" {
-		b.clearBannerHeader(ctx, c, chat)
-	} else {
-		added, err := b.ensureBanner(ctx, c, chat, photo)
-		if err != nil {
-			return m.MessageID, c.Edit(ctx, chat, m.MessageID, text, kb)
-		}
-		if added {
-			// First enable on an existing menu: recreate once to put the banner above it.
-			next, err := c.Send(ctx, chat, text, kb, false)
-			if err != nil {
+	header, _ := b.d.Store.Q.TelegramBannerMessage(ctx, chat)
+	old, _ := b.d.Store.Q.TelegramBannerFile(ctx, chat)
+	if photo != "" {
+		// Adopt an old standalone header once, combining its caption and keyboard.
+		if header != 0 {
+			var err error
+			if old == photo {
+				err = c.EditCaption(ctx, chat, header, text, kb)
+			} else {
+				err = c.EditPhoto(ctx, chat, header, photo, text, kb)
+			}
+			if err == nil {
+				if header != m.MessageID {
+					_ = c.Delete(ctx, chat, m.MessageID)
+				}
+				_ = b.d.Store.Q.SetTelegramBannerMessage(ctx, chat, header, photo)
+				return header, nil
+			}
+			var ae *APIError
+			if errors.As(err, &ae) && ae.Code == 429 {
 				return m.MessageID, err
 			}
+		}
+		sent, err := c.SendPhoto(ctx, chat, photo, text, kb)
+		if err == nil {
+			if header != 0 && header != m.MessageID {
+				_ = c.Delete(ctx, chat, header)
+			}
 			_ = c.Delete(ctx, chat, m.MessageID)
-			return next.MessageID, nil
+			_ = b.d.Store.Q.SetTelegramBannerMessage(ctx, chat, sent.MessageID, photo)
+			return sent.MessageID, nil
+		}
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Code == 429 {
+			return m.MessageID, err
 		}
 	}
-	return m.MessageID, c.Edit(ctx, chat, m.MessageID, text, kb)
+	// An unavailable photo or oversized caption must never block navigation.
+	if header != m.MessageID && len(m.Photo) == 0 {
+		if err := c.Edit(ctx, chat, m.MessageID, text, kb); err == nil {
+			b.clearBannerHeader(ctx, c, chat)
+			return m.MessageID, nil
+		}
+	}
+	sent, err := c.Send(ctx, chat, text, kb, false)
+	if err != nil {
+		return m.MessageID, err
+	}
+	b.clearBannerHeader(ctx, c, chat)
+	if header != m.MessageID {
+		_ = c.Delete(ctx, chat, m.MessageID)
+	}
+	return sent.MessageID, nil
 }
