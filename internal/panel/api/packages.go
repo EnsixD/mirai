@@ -25,7 +25,7 @@ type PackageView struct {
 	PoolID     *int64 `json:"pool_id" doc:"Пул трафика; null — основной трафик"`
 	Lifetime   string `json:"lifetime" enum:"used,period,days" doc:"used — пока не израсходован, period — до конца периода, days — N дней с покупки"`
 	Days       int64  `json:"days" doc:"Срок в днях для lifetime=days"`
-	PriceStars *int64 `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
+	PriceStars *int64 `json:"-"`
 	PriceRub   *int64 `json:"price_rub" doc:"Цена в копейках; null — не продаётся за рубли"`
 	OnSale     bool   `json:"on_sale"`
 	Sort       int64  `json:"sort"`
@@ -42,7 +42,7 @@ type PackageBody struct {
 	PoolID     *int64 `json:"pool_id,omitempty" minimum:"1" doc:"Пул трафика; не передан — основной трафик"`
 	Lifetime   string `json:"lifetime" enum:"used,period,days"`
 	Days       int64  `json:"days,omitempty" minimum:"0" maximum:"3650" doc:"Для lifetime=days: 1–3650"`
-	PriceStars *int64 `json:"price_stars,omitempty" minimum:"1" maximum:"10000"`
+	PriceStars *int64 `json:"-"`
 	PriceRub   *int64 `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 7900 — 79 ₽"`
 	OnSale     bool   `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
 	Sort       int64  `json:"sort,omitempty"`

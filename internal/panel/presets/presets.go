@@ -96,39 +96,12 @@ func NewConfig(id, dest string) (string, error) {
 		// 600s: how long a 0-RTT ticket would live; our clients do a full handshake anyway.
 		t = proto.Template{"type": "vless", "xhttp-config": map[string]any{"path": randomPath(), "mode": "stream-one"},
 			"decryption": proto.VLESSEncMethod + ".native.600s." + key}
-	case "vless_reality_vision":
-		t = proto.Template{"type": "vless", "mirai": map[string]any{"flow": "xtls-rprx-vision"}}
 	case "vless_reality_grpc":
 		t = proto.Template{"type": "vless", "grpc-service-name": strings.ToLower(secure.Token(8))}
 	case "trojan_reality":
 		t = proto.Template{"type": "trojan"}
 	case "hysteria2":
 		return proto.Marshal(proto.Template{"type": "hysteria2", "alpn": []any{"h3"}, "obfs": proto.ObfsSalamander, "obfs-password": secure.Token(24)}), nil
-	case PresetGecko:
-		return proto.Marshal(proto.Template{"type": "hysteria2", "alpn": []any{"h3"}, "obfs": proto.ObfsGecko, "obfs-password": secure.Token(24)}), nil
-	case "tuic_v5":
-		return proto.Marshal(proto.Template{"type": "tuic", "alpn": []any{"h3"}, "congestion-controller": "bbr", "max-idle-time": 15000, "authentication-timeout": 1000}), nil
-	case "anytls":
-		return proto.Marshal(proto.Template{"type": "anytls"}), nil
-	case "trusttunnel":
-		return proto.Marshal(proto.Template{"type": "trusttunnel", "congestion-controller": "bbr"}), nil
-	case "shadowquic":
-		host, _, _ := net.SplitHostPort(QUICDest)
-		return proto.Marshal(proto.Template{"type": "shadowquic", "jls-upstream": map[string]any{"addr": QUICDest, "sni": host}, "alpn": []any{"h3"},
-			"congestion-controller": "bbr"}), nil
-	case "mieru":
-		return proto.Marshal(proto.Template{"type": "mieru", "transport": "TCP"}), nil
-	case "shadowsocks_2022":
-		key := make([]byte, 16)
-		if _, err := rand.Read(key); err != nil {
-			return "", err
-		}
-		return proto.Marshal(proto.Template{"type": "shadowsocks", "cipher": "2022-blake3-aes-128-gcm", "password": base64.StdEncoding.EncodeToString(key)}), nil
-	case "sudoku":
-		return proto.Marshal(proto.Template{"type": "sudoku", "key": secure.Token(32), "aead-method": "chacha20-poly1305", "padding-min": 2, "padding-max": 7,
-			"table-type": "prefer_ascii"}), nil
-	case "snell":
-		return proto.Marshal(proto.Template{"type": "snell", "psk": secure.Token(32), "version": 3}), nil
 	case Custom:
 		return "", fmt.Errorf("the custom preset takes the admin's config")
 	default:

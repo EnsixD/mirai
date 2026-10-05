@@ -134,6 +134,9 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 		v.CatalogError = "catalog_unavailable"
 	} else {
 		for _, e := range c.Adapters {
+			if e.ID != "yookassa" {
+				continue
+			}
 			a, ok := st.Adapters[e.ID]
 			v.Catalog = append(v.Catalog, AddonCatalogEntry{ID: e.ID, Name: e.Name, Description: e.Description, Version: e.Version, Homepage: e.Homepage,
 				Installed: ok, Update: ok && a.Digest != e.Digest})
@@ -145,6 +148,9 @@ func (h *handlers) addonsView(ctx context.Context) (AddonsView, error) {
 		sub = h.d.SubBase(ctx)
 	}
 	for _, id := range slices.Sorted(maps.Keys(st.Adapters)) {
+		if id != "yookassa" {
+			continue
+		}
 		a := st.Adapters[id]
 		av := AddonView{ID: id, Version: a.Version, Status: a.Status, Error: a.Error, Name: map[string]string{}, Help: map[string]string{}, Settings: []AddonField{},
 			Available: slices.Contains(available, id), WebhookURL: h.d.Billing.AddonWebhookURL(ctx, id, sub)}
@@ -202,6 +208,9 @@ func askErr(err error) error {
 }
 
 func (h *handlers) installAddon(ctx context.Context, in *addonIDInput) (*addonsOutput, error) {
+	if in.ID != "yookassa" {
+		return nil, huma.Error404NotFound("addon_unknown")
+	}
 	if h.d.Addons == nil {
 		return nil, huma.Error409Conflict("addons_unavailable")
 	}
@@ -248,6 +257,9 @@ func (h *handlers) removeAddon(ctx context.Context, in *addonIDInput) (*addonsOu
 }
 
 func (h *handlers) patchAddon(ctx context.Context, in *patchAddonInput) (*addonsOutput, error) {
+	if in.ID != "yookassa" {
+		return nil, huma.Error404NotFound("addon_unknown")
+	}
 	cfg, err := h.d.Billing.AddonConfig(ctx, in.ID)
 	if err != nil {
 		return nil, err

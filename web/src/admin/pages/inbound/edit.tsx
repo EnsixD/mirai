@@ -27,7 +27,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   const [dest, setDest] = useState("");
   const [sni, setSni] = useState(""); // the site name clients send when dest is an IP
   const [fp, setFp] = useState(""); // the inbound's own fingerprint, "" for the settings' one
-  const [obfs, setObfs] = useState(""); // Hysteria2: salamander or gecko
+  const [obfs, setObfs] = useState(""); // Hysteria2: salamander
   const [outbound, setOutbound] = useState<Inbound["outbound"]>("direct");
   const [exitNode, setExitNode] = useState<number>(0);
   const [poolId, setPoolId] = useState<number>(0);
@@ -132,7 +132,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
       return;
     }
     if (!configChanged && inbound?.fingerprint !== undefined && fp !== inbound.fingerprint) body.fingerprint = fp;
-    if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && (obfs === "salamander" || obfs === "gecko")) body.obfs = obfs;
+    if (!configChanged && inbound?.obfs !== undefined && obfs !== inbound.obfs && obfs === "salamander") body.obfs = obfs;
     if (listenMode === "custom" && !listen) {
       reject({ listen: t("inbounds.listenRequired") });
       return;
@@ -262,7 +262,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                 </>
               ) : null}
               {inbound?.obfs !== undefined ? (
-                <Field label={t("inbounds.obfs")} error={errors.obfs} hint={configChanged ? t("inbounds.fingerprintLocked") : obfs === "gecko" ? t("inbounds.obfsGeckoHint") : t("inbounds.obfsHint")}>
+                <Field label={t("inbounds.obfs")} error={errors.obfs} hint={configChanged ? t("inbounds.fingerprintLocked") : t("inbounds.obfsHint")}>
                   <Segmented
                     value={obfs}
                     label={t("inbounds.obfs")}
@@ -273,7 +273,6 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
                     }}
                     options={[
                       { value: "salamander", label: "Salamander" },
-                      { value: "gecko", label: "Gecko" },
                     ]}
                   />
                 </Field>

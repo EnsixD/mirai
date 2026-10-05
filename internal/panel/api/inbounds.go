@@ -37,7 +37,7 @@ type InboundView struct {
 	// Fingerprint is the inbound's own uTLS profile, "" for the panel's default; absent when
 	// its clients do not dial through uTLS (QUIC protocols, shared keys).
 	Fingerprint *string        `json:"fingerprint,omitempty" doc:"Отпечаток TLS (uTLS) у клиентов; пусто — общий из настроек"`
-	Obfs        *string        `json:"obfs,omitempty" doc:"Hysteria2: salamander, gecko или пусто (без обфускации); у других типов поля нет"`
+	Obfs        *string        `json:"obfs,omitempty" doc:"Hysteria2: salamander или пусто (без обфускации); у других типов поля нет"`
 	Status      string         `json:"status" enum:"ok,error,unknown"`
 	Error       string         `json:"error,omitempty"`
 	UpdatedAt   time.Time      `json:"updated_at"`

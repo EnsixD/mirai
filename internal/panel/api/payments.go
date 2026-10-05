@@ -16,19 +16,19 @@ import (
 
 type PaymentSettingsView struct {
 	Enabled            bool   `json:"enabled" doc:"Продажа подписок: выключено — бот и Mini App ничего не продают, новые счета не создаются, уже открытые засчитываются"`
-	Stars              bool   `json:"stars" doc:"Telegram Stars: нужен только запущенный бот"`
+	Stars              bool   `json:"-"`
 	AllowNew           bool   `json:"allow_new" doc:"Новые люди могут купить подписку в боте; иначе — только продление"`
 	RenewResetsTraffic bool   `json:"renew_resets_traffic" doc:"Оплаченное продление обнуляет трафик и начинает новый период; иначе только добавляет срок"`
-	TrialTariffID      *int64 `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт без подписки и оплат, кнопка в приветствии бота; null — пробного периода нет. Работает и при выключенной продаже"`
+	TrialTariffID      *int64 `json:"trial_tariff_id" doc:"Тариф пробного периода: один раз на Telegram-аккаунт, тариф отображается в разделе покупки; null — пробного периода нет. Работает и при выключенной продаже"`
 	Trials             int64  `json:"trials" doc:"Сколько пробных подписок выдано"`
 	Available          struct {
-		Stars  bool     `json:"stars"`
+		Stars  bool     `json:"-"`
 		Addons []string `json:"addons" doc:"Адаптеры маркетплейса, которые принимают оплату прямо сейчас"`
-	} `json:"available" doc:"Что принимает оплату прямо сейчас: включено, настроено, для Stars — бот запущен"`
+	} `json:"available" doc:"Настроенные и доступные способы оплаты"`
 	OnSale int `json:"on_sale" doc:"Сколько тарифов бот может продать прямо сейчас: «В продаже» и с ценой для способа, который принимает оплату"`
 	// Moving: the built-in YooKassa and CryptoBot moved to the marketplace in 0.4.4; their
 	// adapters are installed after the update.
-	Moving []string `json:"moving" doc:"Встроенные ЮKassa и CryptoBot переехали в маркетплейс: адаптеры, которые сервер ещё ставит"`
+	Moving []string `json:"moving" doc:"Адаптеры платежей, ожидающие установки"`
 }
 
 type paymentSettingsOutput struct{ Body PaymentSettingsView }
@@ -36,7 +36,7 @@ type paymentSettingsOutput struct{ Body PaymentSettingsView }
 type patchPaymentSettingsInput struct {
 	Body struct {
 		Enabled            *bool  `json:"enabled,omitempty"`
-		Stars              *bool  `json:"stars,omitempty"`
+		Stars              *bool  `json:"-"`
 		AllowNew           *bool  `json:"allow_new,omitempty"`
 		RenewResetsTraffic *bool  `json:"renew_resets_traffic,omitempty"`
 		TrialTariffID      *int64 `json:"trial_tariff_id,omitempty" minimum:"0" doc:"Тариф пробного периода; 0 — выключить"`
@@ -45,7 +45,7 @@ type patchPaymentSettingsInput struct {
 
 type PaymentView struct {
 	ID         int64      `json:"id"`
-	Provider   string     `json:"provider" doc:"stars или addon:<id> — адаптер маркетплейса"`
+	Provider   string     `json:"provider" doc:"addon:yookassa — адаптер ЮKassa"`
 	Kind       string     `json:"kind" enum:"new,renew,package" doc:"package — пакет трафика: tariff_name — название пакета"`
 	Status     string     `json:"status" enum:"pending,paid,applied,expired,failed,refunded"`
 	TgID       int64      `json:"tg_id"`
@@ -54,7 +54,7 @@ type PaymentView struct {
 	UserName   string     `json:"user_name,omitempty"`
 	TariffName string     `json:"tariff_name"`
 	TermDays   *int64     `json:"term_days,omitempty" doc:"Купленный срок в днях (0 — бессрочно); нет у пакетов и у платежей до сроков в тарифах"`
-	Amount     int64      `json:"amount" doc:"Stars или копейки"`
+	Amount     int64      `json:"amount" doc:"Сумма в копейках"`
 	Currency   string     `json:"currency" enum:"XTR,RUB"`
 	ExternalID string     `json:"external_id,omitempty" doc:"Номер платежа у провайдера"`
 	Error      string     `json:"error,omitempty" doc:"Почему оплаченный платёж ещё не применён"`
@@ -72,7 +72,7 @@ type PaymentTotal struct {
 
 type listPaymentsInput struct {
 	Status   string `query:"status" enum:"pending,paid,applied,expired,failed,refunded,"`
-	Provider string `query:"provider" pattern:"^(stars|addon:[a-z0-9][a-z0-9-]{0,31})?$"`
+	Provider string `query:"provider" pattern:"^(addon:yookassa)?$"`
 	UserID   int64  `query:"user_id" minimum:"0"`
 	Before   int64  `query:"before" minimum:"0" doc:"id последнего платежа предыдущей страницы"`
 	Limit    int64  `query:"limit" minimum:"1" maximum:"200" default:"50"`
@@ -92,7 +92,7 @@ func (h *handlers) registerPayments() {
 	huma.Register(h.api, huma.Operation{OperationID: "get-payment-settings", Method: http.MethodGet, Path: "/api/v1/payments/settings", Summary: "Настройки оплаты", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.getPaymentSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "update-payment-settings", Method: http.MethodPatch, Path: "/api/v1/payments/settings", Summary: "Изменить настройки оплаты", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.updatePaymentSettings)
 	huma.Register(h.api, huma.Operation{OperationID: "list-payments", Method: http.MethodGet, Path: "/api/v1/payments", Summary: "История платежей", Tags: tags}, h.listPayments)
-	huma.Register(h.api, huma.Operation{OperationID: "refund-payment", Method: http.MethodPost, Path: "/api/v1/payments/{id}/refund", Summary: "Вернуть Stars покупателю", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.refundPayment)
+	huma.Register(h.api, huma.Operation{OperationID: "refund-payment", Method: http.MethodPost, Path: "/api/v1/payments/{id}/refund", Summary: "Вернуть платёж покупателю", Tags: tags, Metadata: sessionOnly, Extensions: sessionOnlyExt}, h.refundPayment)
 }
 
 func (h *handlers) paymentSettings(ctx context.Context) (PaymentSettingsView, error) {

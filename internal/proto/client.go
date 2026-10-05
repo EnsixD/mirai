@@ -219,15 +219,13 @@ func (c *clientBuilder) security() error {
 	}
 	typ := c.t.Type()
 	switch typ {
-	case "vless", "vmess", "trojan", "anytls":
+	case "vless", "vmess", "trojan":
 		c.y["tls"] = true
 		c.y["client-fingerprint"] = c.fingerprint()
 		c.q.Set("security", "tls")
 		c.q.Set("fp", c.fingerprint())
-	case "trusttunnel": // always TLS, no switch for it
-		c.y["client-fingerprint"] = c.fingerprint()
 	}
-	if typ == "hysteria2" || typ == "tuic" {
+	if typ == "hysteria2" {
 		delete(c.y, "tls")
 	}
 	if sni != "" {
@@ -244,8 +242,6 @@ func (c *clientBuilder) security() error {
 		case "hysteria2":
 			c.q.Set("insecure", "1")
 			c.q.Set("pinSHA256", c.in.PinSHA256)
-		case "tuic":
-			c.q.Set("allow_insecure", "1") // the TUIC link scheme has no pin
 		default:
 			c.q.Set("allowInsecure", "1")
 			c.q.Set("insecure", "1")
@@ -349,37 +345,10 @@ func (c *clientBuilder) finish() (Client, error) {
 			c.y["obfs"], c.y["obfs-password"] = obfs, c.t.str("obfs-password")
 			c.q.Set("obfs", obfs)
 			c.q.Set("obfs-password", c.t.str("obfs-password"))
-			// Gecko's sizes are the sender's own; the client gets the server's.
-			for _, key := range []string{"obfs-min-packet-size", "obfs-max-packet-size"} {
-				if n, ok := toInt(c.t[key]); ok {
-					c.y[key] = n
-				}
-			}
+
 		}
 		return Client{c.y, "hysteria2://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
-	case "tuic":
-		cc := c.t.str("congestion-controller")
-		if cc == "" {
-			cc = "bbr"
-		}
-		alpn := strings1(c.t["alpn"])
-		if len(alpn) == 0 {
-			alpn = []string{"h3"}
-		}
-		c.y["uuid"], c.y["password"], c.y["alpn"] = s.UUID, s.Secret, alpn
-		c.y["congestion-controller"], c.y["udp-relay-mode"] = cc, "native"
-		c.q.Set("congestion_control", cc)
-		c.q.Set("alpn", alpn[0])
-		c.q.Set("udp_relay_mode", "native")
-		return Client{c.y, "tuic://" + s.UUID + ":" + url.PathEscape(s.Secret) + "@" + c.addr() + "?" + c.q.Encode() + "#" + name}, nil
-	case "anytls":
-		c.y["password"], c.y["udp"] = s.Secret, true
-		c.q.Del("security")
-		c.q.Del("fp")
-		return Client{c.y, "anytls://" + url.PathEscape(s.Secret) + "@" + c.addr() + "/?" + c.q.Encode() + "#" + name}, nil
-	}
-	if cl, ok := c.finishExtra(); ok {
-		return cl, nil
+
 	}
 	return Client{}, fail("config_type", "type")
 }

@@ -24,10 +24,10 @@ type TariffView struct {
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period"`
 	BillingDay    *int64      `json:"billing_day" doc:"День месяца, в который заканчивается срок; null — срок в днях"`
 	PriceLabel    string      `json:"price_label"`
-	PriceStars    *int64      `json:"price_stars" doc:"Цена в Telegram Stars; null — не продаётся за Stars"`
-	PriceRub      *int64      `json:"price_rub" doc:"Цена в копейках (ЮKassa, CryptoBot); null — не продаётся за рубли"`
+	PriceStars    *int64      `json:"-"`
+	PriceRub      *int64      `json:"price_rub" doc:"Цена в копейках (ЮKassa); null — не продаётся за рубли"`
 	OnSale        bool        `json:"on_sale" doc:"Продаётся в боте и Mini App"`
-	Terms         []TermView  `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_stars и price_rub"`
+	Terms         []TermView  `json:"terms" doc:"Сроки, на которые продаётся тариф, по порядку; первый — тот же, что duration_days, price_rub"`
 	Pools         []PoolLimit `json:"pools" doc:"Лимиты пулов трафика; пул не в списке — без лимита"`
 	Sort          int64       `json:"sort"`
 }
@@ -35,7 +35,7 @@ type TariffView struct {
 // TermView is one term a tariff is sold for.
 type TermView struct {
 	Days       int64  `json:"days" doc:"0 — бессрочно; с днём оплаты — месяцы по 30 дней"`
-	PriceStars *int64 `json:"price_stars" doc:"Цена в Telegram Stars; null — не за Stars"`
+	PriceStars *int64 `json:"-"`
 	PriceRub   *int64 `json:"price_rub" doc:"Цена в копейках; null — не за рубли"`
 }
 
@@ -52,7 +52,7 @@ func viewTariff(t db.Tariff, terms []db.TariffTerm) TariffView {
 
 type termBody struct {
 	Days       int64  `json:"days" minimum:"0" maximum:"3650" doc:"0 — бессрочно; с днём оплаты — месяцы по 30 дней"`
-	PriceStars *int64 `json:"price_stars,omitempty" minimum:"1" maximum:"10000" doc:"Цена в Telegram Stars"`
+	PriceStars *int64 `json:"-"`
 	PriceRub   *int64 `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
 }
 
@@ -68,10 +68,10 @@ type tariffBody struct {
 	ResetStrategy string      `json:"reset_strategy" enum:"none,month_start,period" default:"none"`
 	BillingDay    *int64      `json:"billing_day,omitempty" minimum:"1" maximum:"31" doc:"Срок до этого числа месяца: месяц = от дня оплаты до дня оплаты"`
 	PriceLabel    string      `json:"price_label,omitempty" maxLength:"40"`
-	PriceStars    *int64      `json:"price_stars,omitempty" minimum:"1" maximum:"10000" doc:"Цена в Telegram Stars"`
+	PriceStars    *int64      `json:"-"`
 	PriceRub      *int64      `json:"price_rub,omitempty" minimum:"100" maximum:"100000000" doc:"Цена в копейках: 19900 — 199 ₽"`
 	OnSale        bool        `json:"on_sale,omitempty" doc:"Продавать в боте и Mini App; нужна хотя бы одна цена"`
-	Terms         []termBody  `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_stars и price_rub берутся из первого. Не передан — первый срок из duration_days, price_stars и price_rub, остальные без изменений"`
+	Terms         []termBody  `json:"terms,omitempty" maxItems:"12" doc:"Все сроки по порядку, когда тариф продаётся на несколько; тогда duration_days, price_rub берутся из первого. Не передан — первый срок из duration_days, price_rub, остальные без изменений"`
 	Pools         []PoolLimit `json:"pools,omitempty" maxItems:"100" doc:"Лимиты пулов трафика; не передан — без изменений"`
 	Sort          int64       `json:"sort,omitempty"`
 }

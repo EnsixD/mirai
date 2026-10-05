@@ -51,7 +51,6 @@ func Listener(t Template, name, listen, port string, slots []Slot, cert Cert, o 
 	if !r.shared {
 		l["users"] = users(t.Type(), slots, ext)
 	}
-	listenerExtra(t, l)
 	if r.cert || ext.TLS == "node" {
 		if cert.CertPath == "" {
 			return nil, errors.New("no node certificate for " + t.Type())
@@ -82,19 +81,13 @@ func users(typ string, slots []Slot, ext Ext) any {
 			out = append(out, map[string]any{"username": s.Name, "uuid": s.UUID, "alterId": 0})
 		}
 		return out
-	case "trojan", "trusttunnel", "shadowquic":
+	case "trojan":
 		out := make([]map[string]any, 0, len(slots))
 		for _, s := range slots {
 			out = append(out, map[string]any{"username": s.Name, "password": s.Secret})
 		}
 		return out
-	case "tuic":
-		m := make(map[string]string, len(slots))
-		for _, s := range slots {
-			m[s.UUID] = s.Secret
-		}
-		return m
-	default: // hysteria2, anytls, mieru
+	default: // hysteria2
 		m := make(map[string]string, len(slots))
 		for _, s := range slots {
 			m[s.Name] = s.Secret
