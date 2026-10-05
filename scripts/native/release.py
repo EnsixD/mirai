@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py', 'firewall.py']},
     'notes': {
-        'ru': 'Разделены профиль пользователя и его подписки в админ-боте, исправлены переходы назад. Добавлены флаги Швеции, Польши и других стран. Автоматические правила UFW для активных инбаундов, проверка обновлений без кэша GitHub, модальные настройки инбаундов и исправленные счётчики устройств.',
-        'en': 'Separate customer profiles and subscriptions in the admin bot with clear back navigation. More inbound flags, including Sweden and Poland. Automatic UFW rules for active inbounds, uncached release checks, inbound settings modals and corrected device counts.',
+        'ru': 'Встроенная ЮKassa без маркетплейса и контейнеров: отдельные тестовый и боевой магазины, переключение режима и автоматическая выдача подписок. Тестовые оплаты не входят в реальные финансовые итоги. Изменённые лимиты тарифа автоматически применяются к его подписчикам без сброса оплаченного срока и трафика; удалённый тариф не отображается у пользователя.',
+        'en': 'Built-in YooKassa without marketplace containers: separate test and live shops, mode switching and automatic subscription issuance. Test payments are excluded from real purchase totals. Updated tariff limits propagate to subscribers while preserving paid time and used traffic; deleted tariffs are removed from customer displays.',
     },
 }
 for arch in ['x86_64', 'aarch64']:
