@@ -11,19 +11,22 @@ import tempfile
 
 version = os.environ['RELEASE_VERSION']
 tag = os.environ['GITHUB_REF_NAME']
-archive = Path('dist/mirai-linux-x86_64.tar.gz')
 manifest = {
     'version': version,
     'published': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    'native': {'x86_64': {
-        'url': f'https://github.com/EnsixD/mirai/releases/download/{tag}/{archive.name}',
-        'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
-    }},
+    'native': {},
+    'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
     'notes': {
         'ru': 'Нативная Mirai: панель и нода без Docker. Подписанные обновления с резервной копией и откатом.',
         'en': 'Native Mirai panel and node without Docker. Signed updates with backup and rollback.',
     },
 }
+for arch in ['x86_64', 'aarch64']:
+    archive = Path(f'dist/mirai-linux-{arch}.tar.gz')
+    manifest['native'][arch] = {
+        'url': f'https://github.com/EnsixD/mirai/releases/download/{tag}/{archive.name}',
+        'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+    }
 target = Path('dist/manifest.json')
 target.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
 with tempfile.TemporaryDirectory() as temporary:

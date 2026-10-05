@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -66,7 +67,8 @@ try:
         if tuple(map(int, version.split('.'))) <= tuple(map(int, previous.split('.'))):
             write_status('ok', previous, previous)
             sys.exit(0)
-        asset = manifest['native']['x86_64']
+        arch = {'x86_64': 'x86_64', 'aarch64': 'aarch64'}[platform.machine()]
+        asset = manifest['native'][arch]
         archive = fetch(asset['url'])
         if hashlib.sha256(archive).hexdigest() != asset['sha256']:
             raise ValueError('Native archive checksum mismatch')
@@ -83,27 +85,36 @@ try:
             if line and not line.startswith('#'):
                 key, value = line.split('=', 1)
                 environment[key] = value
-        connection = urllib.parse.urlparse(environment['MIRAI_DATABASE_URL'])
-        pg = dict(os.environ, PGHOST=connection.hostname, PGPORT=str(connection.port or 5432),
-                  PGUSER=connection.username, PGPASSWORD=urllib.parse.unquote(connection.password),
-                  PGDATABASE=connection.path.lstrip('/'))
+        services = ['mirai-node.service']
+        pg = None
+        if 'MIRAI_DATABASE_URL' in environment:
+            services.append('mirai.service')
+            connection = urllib.parse.urlparse(environment['MIRAI_DATABASE_URL'])
+            pg = dict(os.environ, PGHOST=connection.hostname, PGPORT=str(connection.port or 5432),
+                      PGUSER=connection.username, PGPASSWORD=urllib.parse.unquote(connection.password),
+                      PGDATABASE=connection.path.lstrip('/'))
+        updater = fetch(asset['url'].rsplit('/', 1)[0] + '/update.py')
+        if hashlib.sha256(updater).hexdigest() != manifest['files']['update.py']:
+            raise ValueError('Updater checksum mismatch')
+        (work / 'new/update.py').write_bytes(updater)
         backup = Path('/var/backups/mirai') / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         backup.mkdir(parents=True, mode=0o700)
-        for name in ('mirai', 'mirai-node', 'VERSION'):
+        for name in ('mirai', 'mirai-node', 'VERSION', 'update.py'):
             shutil.copy2(ROOT / name, backup / name)
         write_status('running', version, previous)
-        run('systemctl', 'stop', 'mirai.service', 'mirai-node.service')
+        run('systemctl', 'stop', *services)
         stopped = True
-        run('pg_dump', '-Fc', '-f', str(backup / 'database.dump'), env=pg)
-        for name in ('mirai', 'mirai-node', 'VERSION'):
+        if pg is not None:
+            run('pg_dump', '-Fc', '-f', str(backup / 'database.dump'), env=pg)
+        for name in ('mirai', 'mirai-node', 'VERSION', 'update.py'):
             shutil.copy2(work / 'new' / name, ROOT / (name + '.new'))
             if name != 'VERSION':
                 (ROOT / (name + '.new')).chmod(0o755)
             (ROOT / (name + '.new')).replace(ROOT / name)
-        run('systemctl', 'start', 'mirai-node.service', 'mirai.service')
+        run('systemctl', 'start', *services)
         for attempt in range(30):
             time.sleep(1)
-            result = subprocess.run([str(ROOT / 'mirai'), 'health'], env=dict(os.environ, **environment), capture_output=True)
+            result = subprocess.run([str(ROOT / 'mirai'), 'health'] if pg is not None else ['systemctl', 'is-active', 'mirai-node'], env=dict(os.environ, **environment), capture_output=True)
             if result.returncode == 0:
                 break
         else:
@@ -112,11 +123,11 @@ try:
         write_status('ok', version, previous)
 except Exception as error:
     if stopped and backup is not None:
-        subprocess.run(['systemctl', 'stop', 'mirai.service', 'mirai-node.service'])
-        for name in ('mirai', 'mirai-node', 'VERSION'):
+        subprocess.run(['systemctl', 'stop', *services])
+        for name in ('mirai', 'mirai-node', 'VERSION', 'update.py'):
             shutil.copy2(backup / name, ROOT / name)
         if (backup / 'database.dump').exists():
             run('pg_restore', '--clean', '--if-exists', '--no-owner', '--exit-on-error', '-d', pg['PGDATABASE'], str(backup / 'database.dump'), env=pg)
-        run('systemctl', 'start', 'mirai-node.service', 'mirai.service')
+        run('systemctl', 'start', *services)
     write_status('failed', version, previous, type(error).__name__ + ': update failed; see systemd journal')
     raise
