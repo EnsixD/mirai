@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py', 'firewall.py']},
     'notes': {
-        'ru': 'Автоматическое открытие и закрытие портов активных инбаундов в UFW с сохранением SSH и правил других сервисов. Проверка обновлений обходит кэш GitHub. Настройка инбаундов в модальном окне; включены улучшения Telegram и счётчиков из 0.5.0.6.',
-        'en': 'Automatically open and close UFW ports for active inbounds while preserving SSH and other services. Release checks bypass GitHub caches. Inbound settings use a modal; includes Telegram and device-count improvements from 0.5.0.6.',
+        'ru': 'Разделены профиль пользователя и его подписки в админ-боте, исправлены переходы назад. Добавлены флаги Швеции, Польши и других стран. Автоматические правила UFW для активных инбаундов, проверка обновлений без кэша GitHub, модальные настройки инбаундов и исправленные счётчики устройств.',
+        'en': 'Separate customer profiles and subscriptions in the admin bot with clear back navigation. More inbound flags, including Sweden and Poland. Automatic UFW rules for active inbounds, uncached release checks, inbound settings modals and corrected device counts.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

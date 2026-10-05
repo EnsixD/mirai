@@ -219,8 +219,13 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		if frozen {
 			freezeLabel, freezeAction = "▶ Разморозить", "unfreeze"
 		}
-		rows := [][]Button{{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id)), adminButton("📅 Продлить", fmt.Sprintf("extend:%d", id))}, {adminButton("🔗 Ссылка", fmt.Sprintf("link:%d", id)), adminButton("👤 Профиль пользователя", fmt.Sprintf("owner:%d", id))}, {adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))}}
-		rows = append(rows, []Button{adminButton("← Все подписки", "subs:0")}, adminBack())
+		rows := [][]Button{{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id)), adminButton("📅 Продлить", fmt.Sprintf("extend:%d", id))}, {adminButton("🔗 Ссылка", fmt.Sprintf("link:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))}}
+		if link, err := q.TgLinkOfUser(ctx, id); err == nil {
+			rows = append(rows, []Button{adminButton("← Подписки пользователя", fmt.Sprintf("owned:%d", link.TgID))})
+		} else {
+			rows = append(rows, []Button{adminButton("← Все подписки", "subs:0")})
+		}
+		rows = append(rows, adminBack())
 		return text, adminKB(rows...)
 	case "link":
 		u, err := q.GetUser(ctx, id)
@@ -250,13 +255,31 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		cfg.Lang = "ru"
 		text, _ := b.customerProfile(ctx, cfg, id, subscriptions)
 		rows := [][]Button{}
-		for _, subscription := range subscriptions {
-			rows = append(rows, []Button{adminButton(shortAdmin(subscription.Name, 60), fmt.Sprintf("user:%d", subscription.ID))})
-		}
+		rows = append(rows, []Button{adminButton(fmt.Sprintf("📋 Подписки пользователя (%d)", len(subscriptions)), fmt.Sprintf("owned:%d", id))})
 		if cfg.Admin.Grant {
 			rows = append(rows, []Button{adminButton("🎁 Выдать подписку", fmt.Sprintf("grant:%d", id))})
 		}
 		return text, adminKB(append(rows, []Button{adminButton("← Пользователи", "users:0")}, adminBack())...)
+	case "owned":
+		subscriptions, err := q.ListTgLinksOf(ctx, id)
+		if err != nil {
+			return "Не удалось загрузить подписки.", adminKB(adminBack())
+		}
+		rows := [][]Button{}
+		for _, subscription := range subscriptions {
+			label := subscription.Name
+			if user, err := q.GetUser(ctx, subscription.ID); err == nil && user.TariffID.Valid {
+				if tariff, err := q.GetTariff(ctx, user.TariffID.Int64); err == nil {
+					label = tariff.Name + " · " + subscription.Name
+				}
+			}
+			rows = append(rows, []Button{adminButton(shortAdmin(fmt.Sprintf("📋 #%d · %s", subscription.ID, label), 60), fmt.Sprintf("user:%d", subscription.ID))})
+		}
+		text := fmt.Sprintf("<b>📋 Подписки пользователя: %d</b>\n\nВыберите подписку, чтобы посмотреть срок, трафик и ссылку подключения или изменить её.", len(subscriptions))
+		if len(subscriptions) == 0 {
+			text = "<b>📋 Подписки пользователя</b>\n\nУ пользователя пока нет подписок. Выдать подписку можно в его профиле."
+		}
+		return text, adminKB(append(rows, []Button{adminButton("← Профиль пользователя", fmt.Sprintf("contact:%d", id))}, adminBack())...)
 	case "tariffs":
 		tariffs, err := q.ListTariffs(ctx)
 		if err != nil {
@@ -634,7 +657,7 @@ func (b *Bot) adminSectionAllowed(ctx context.Context, chat int64, data string) 
 	switch cmd {
 	case "users":
 		return cfg.Users
-	case "contact", "owner":
+	case "contact", "owner", "owned":
 		return cfg.Users || cfg.Subscriptions || cfg.Search
 	case "subs":
 		return cfg.Subscriptions

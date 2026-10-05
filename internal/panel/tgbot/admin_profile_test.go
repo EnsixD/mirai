@@ -28,13 +28,38 @@ func TestAdminCustomerProfileAndGrant(t *testing.T) {
 		t.Fatal("administrator cannot see customer totals:", text)
 	}
 	grant := false
+	owned := false
 	for _, row := range kb.InlineKeyboard {
 		for _, button := range row {
 			grant = grant || button.CallbackData == "a:grant:555"
+			owned = owned || button.CallbackData == "a:owned:555"
+			if strings.HasPrefix(button.CallbackData, "a:user:") {
+				t.Fatal("subscription buttons mixed into the customer profile")
+			}
 		}
 	}
 	if !grant {
 		t.Fatal("grant is not tied to the selected account")
+	}
+	if !owned {
+		t.Fatal("separate customer subscription list missing")
+	}
+	text, kb = e.bot.adminScreen(e.ctx, 900, "a:owned:555", "")
+	if !strings.Contains(text, "Подписки пользователя: 2") || !strings.HasPrefix(kb.InlineKeyboard[0][0].Text, "📋 #") {
+		t.Fatal("subscription list does not clearly identify subscriptions", text)
+	}
+	_, kb = e.bot.adminScreen(e.ctx, 900, fmt.Sprintf("a:user:%d", e.user.ID), "")
+	back := false
+	for _, row := range kb.InlineKeyboard {
+		for _, button := range row {
+			back = back || button.CallbackData == "a:owned:555"
+			if strings.HasPrefix(button.CallbackData, "a:owner:") {
+				t.Fatal("duplicate customer-profile action remains on subscription")
+			}
+		}
+	}
+	if !back {
+		t.Fatal("subscription must return to its owner's subscriptions")
 	}
 	_, kb = e.bot.adminScreen(e.ctx, 900, "a:home", "")
 	for _, row := range kb.InlineKeyboard {
