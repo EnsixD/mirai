@@ -62,6 +62,7 @@ export function TariffsPage() {
     mutationFn: (id: number) => unwrap(api.DELETE("/api/v1/tariffs/{id}", { params: { path: { id } } })),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.tariffs });
+      void qc.invalidateQueries({ queryKey: qk.users });
       void qc.invalidateQueries({ queryKey: qk.paymentSettings });
       toast.ok(t("tariffs.deleted"));
       setDelete(null);
@@ -243,6 +244,7 @@ function TariffDrawer({ tariff, onClose }: { tariff: Tariff | "new" | null; onCl
       tariff === "new" || !tariff ? unwrap(api.POST("/api/v1/tariffs", { body })) : unwrap(api.PUT("/api/v1/tariffs/{id}", { params: { path: { id: tariff.id } }, body })),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.tariffs });
+      void qc.invalidateQueries({ queryKey: qk.users });
       void qc.invalidateQueries({ queryKey: qk.paymentSettings });
       toast.ok(tariff === "new" ? t("tariffs.created") : t("tariffs.saved"));
       onClose();

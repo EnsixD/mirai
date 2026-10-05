@@ -140,10 +140,24 @@ func (h *handlers) createTariff(ctx context.Context, in *tariffInput) (*tariffOu
 		if err != nil {
 			return err
 		}
-		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil || b.Pools == nil {
+		if err := domain.SetTariffTerms(ctx, q, t.ID, terms); err != nil {
 			return err
 		}
-		return setTariffPools(ctx, q, t.ID, b.Pools)
+		if b.Pools != nil {
+			if err := setTariffPools(ctx, q, t.ID, b.Pools); err != nil {
+				return err
+			}
+		}
+		ids, err := q.PropagateTariff(ctx, t, h.d.Now().Unix())
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := domain.ApplyTariffPools(ctx, q, id, t.ID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -190,6 +204,7 @@ func (h *handlers) updateTariff(ctx context.Context, in *tariffUpdateInput) (*ta
 		return nil, err
 	}
 	h.audit(ctx, sessionOf(ctx).AdminID, "tariff.update", "tariff", strconv.FormatInt(t.ID, 10), nil)
+	h.d.Users.Changed()
 	return h.tariffOut(ctx, t)
 }
 

@@ -252,7 +252,7 @@ const UserRow = memo(function UserRow({ u, tariff, selected, onToggle, onOpen }:
       </td>
       <td>
         <div className="font-medium">{tariff?.name ?? "—"}</div>
-        <div className="mt-0.5 text-xs text-[var(--ink-500)]">{u.id < 0 ? t("users.noSubscription") : u.traffic_limit != null ? bytes(u.traffic_limit) : t("users.unlimited")}</div>
+        <div className="mt-0.5 text-xs text-[var(--ink-500)]">{u.id < 0 ? t("users.noSubscription") : !tariff ? t("users.noTariff") : u.traffic_limit != null ? bytes(u.traffic_limit) : t("users.unlimited")}</div>
       </td>
       <td>
         <Usage u={u} />
