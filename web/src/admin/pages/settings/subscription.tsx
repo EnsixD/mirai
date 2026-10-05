@@ -52,7 +52,7 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
         {s.sub_base_url ? (
           <div className="panel-soft mb-4 p-3">
             <div className="text-xs text-[var(--ink-500)]">{t("settings.subPortLinks")}</div>
-            <div className="mono truncate text-[13px]">{s.sub_base_url.replace(/[^/]+\/$/, "…")}</div>
+            <div className="mono break-all text-[13px]">{s.sub_base_url}{"A7b2X9mQ4".padEnd(s.sub_id_length,"x").slice(0,s.sub_id_length)}</div>
           </div>
         ) : null}
         <Field label={t("settings.subPortField")} htmlFor="s-sub-port" hint={t("settings.subPortHint", { panel: s.panel_port })} error={error ?? (valid ? undefined : t("settings.subPortInvalid"))}>

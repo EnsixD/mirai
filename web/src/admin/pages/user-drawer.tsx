@@ -20,6 +20,7 @@ export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }
   const u = user.data;
   return (
     <Drawer
+      presentation="modal"
       open={!!id}
       onOpenChange={(v) => !v && onClose()}
       title={u?.name ?? t("userDrawer.fallbackTitle")}
@@ -82,6 +83,9 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
           }
         >
           <Power size={18} aria-hidden /> {disabled ? t("common.enable") : t("users.disable")}
+        </Button>
+        <Button className="text-[var(--bad)]" loading={remove.isPending} onClick={() => setConfirm("delete")}>
+          <Trash2 size={18} aria-hidden /> {t("userDrawer.delete")}
         </Button>
         <Menu.Root>
           <Menu.Trigger asChild>
