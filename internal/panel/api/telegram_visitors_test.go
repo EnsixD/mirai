@@ -75,6 +75,9 @@ func TestTelegramVisitorsAppearWithoutSubscriptions(t *testing.T) {
 	if count, err := st.Q.CountTelegramVisitors(ctx); err != nil || count != 0 {
 		t.Fatal("subscribed account counted twice", count, err)
 	}
+	if affected, err := service.Bulk(ctx, []int64{-987654}, domain.BulkDelete, 0); err != nil || affected != 0 {
+		t.Fatal("stale visitor selection deleted a subscribed account", affected, err)
+	}
 	if _, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,user_id,kind,tariff_id,tariff_name,amount,currency,status,created_at,term_days) VALUES('addon:yookassa','delete-test',987654,$1,'new',$2,'Paid',20000,'RUB','applied',1,30)`, user.ID, tariff.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +93,16 @@ func TestTelegramVisitorsAppearWithoutSubscriptions(t *testing.T) {
 	}
 	if totals, err := st.Q.CustomerPurchases(ctx, 987654); err != nil || totals.RublesKopecks != 20000 || totals.Days != 30 {
 		t.Fatal("subscription deletion lost customer purchase history", err)
+	}
+	if affected, err := service.Bulk(ctx, []int64{-987654, -987654}, domain.BulkDelete, 0); err != nil || affected != 1 {
+		t.Fatal("visitor cannot be deleted through panel bulk action", affected, err)
+	}
+	result, err = h.listUsers(ctx, &listUsersInput{State: "all", Limit: 100})
+	if err != nil || result.Body.Total != 0 {
+		t.Fatal("deleted visitor remains in panel", err)
+	}
+	if totals, err := st.Q.CustomerPurchases(ctx, 987654); err != nil || totals.RublesKopecks != 20000 {
+		t.Fatal("visitor deletion removed receipts", err)
 	}
 
 }

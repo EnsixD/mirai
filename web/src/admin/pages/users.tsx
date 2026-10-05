@@ -49,7 +49,7 @@ export function UsersPage() {
   // What a bulk action touches is what the admin sees ticked: a row that left the list (a
   // search, another filter, a user deleted elsewhere) drops out of the selection with it.
   const chosen = useMemo(() => items.filter((u) => selected.has(u.id)), [items, selected]);
-  const selectable = items.filter((u) => u.id > 0);
+  const selectable = items;
  const allSelected = selectable.length > 0 && chosen.length === selectable.length;
   const openUser = useCallback((id?: number) => void navigate({ search: (s) => ({ ...s, user: id, create: undefined }) }), [navigate]);
   const toggle = useCallback(
@@ -133,7 +133,7 @@ export function UsersPage() {
                     <thead>
                       <tr>
                         <th className="w-10">
-                          <input type="checkbox" className="check" checked={allSelected} aria-label={t("users.selectAll")} onChange={() => setSelected(allSelected ? new Set() : new Set(data.items.filter((u) => u.id > 0).map((u) => u.id)))} />
+                          <input type="checkbox" className="check" checked={allSelected} aria-label={t("users.selectAll")} onChange={() => setSelected(allSelected ? new Set() : new Set(data.items.map((u) => u.id)))} />
                         </th>
                         <th>{t("users.colUser")}</th>
                         <th>{t("users.colTariff")}</th>
@@ -227,7 +227,7 @@ const UserRow = memo(function UserRow({ u, tariff, selected, onToggle, onOpen }:
   return (
     <tr className={selected ? "sel" : undefined} onClick={() => onOpen(u.id)}>
       <td onClick={(e) => e.stopPropagation()}>
-        <input type="checkbox" className="check" checked={selected} disabled={u.id < 0} onChange={() => onToggle(u.id)} aria-label={t("users.select", { name: u.name })} />
+        <input type="checkbox" className="check" checked={selected} onChange={() => onToggle(u.id)} aria-label={t("users.select", { name: u.name })} />
       </td>
       <td>
         <div className="flex min-w-[200px] items-center gap-3">
@@ -335,6 +335,7 @@ function BulkBar({ chosen, clear }: { chosen: User[]; clear: () => void }) {
   const bulk = useUserMutation(userActions.bulk);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const n = chosen.length;
+  const hasVisitors = chosen.some(u => u.id < 0);
   const busy = bulk.isPending;
   const running = (action: BulkAction) => busy && bulk.variables?.action === action;
   const run = (action: BulkAction) =>
@@ -371,15 +372,15 @@ function BulkBar({ chosen, clear }: { chosen: User[]; clear: () => void }) {
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
           >
             <span className="num mr-2 font-semibold whitespace-nowrap">{t("users.selected", { n })}</span>
-            <Button size="sm" loading={running("extend")} disabled={busy} onClick={() => run("extend")} title={t("users.extendPeriodHint")}>
+            <Button size="sm" loading={running("extend")} disabled={busy || hasVisitors} onClick={() => run("extend")} title={t("users.extendPeriodHint")}>
               <CalendarPlus size={16} aria-hidden />
               <span className="max-sm:hidden">{t("users.extendPeriod")}</span>
             </Button>
-            <Button size="sm" loading={running("reset")} disabled={busy} onClick={() => run("reset")} aria-label={t("users.resetTraffic")}>
+            <Button size="sm" loading={running("reset")} disabled={busy || hasVisitors} onClick={() => run("reset")} aria-label={t("users.resetTraffic")}>
               <RotateCcw size={16} aria-hidden />
               <span className="max-sm:hidden">{t("users.resetTraffic")}</span>
             </Button>
-            <Button size="sm" variant="danger" loading={running("disable")} disabled={busy} onClick={() => run("disable")} aria-label={t("users.disable")}>
+            <Button size="sm" variant="danger" loading={running("disable")} disabled={busy || hasVisitors} onClick={() => run("disable")} aria-label={t("users.disable")}>
               <Power size={16} aria-hidden />
               <span className="max-sm:hidden">{t("users.disable")}</span>
             </Button>
@@ -408,12 +409,17 @@ function BulkBar({ chosen, clear }: { chosen: User[]; clear: () => void }) {
 
 function VisitorPanel({ user, onClose, onCreated }: { user?: User; onClose: () => void; onCreated: (id: number) => void }) {
  const [grant, setGrant] = useState(false);
+ const [confirmDelete,setConfirmDelete]=useState(false);
+ const toast=useToast();
+ const deletion=useUserMutation(userActions.bulk);
  return <>
   <Drawer presentation="modal" open={!!user && !grant} onOpenChange={(open) => { if (!open) onClose(); }} title={user?.name ?? ""} meta={t("users.noSubscription")}>
     <div className="panel-soft p-4 mb-4"><p>{user?.contact || "Telegram"}</p><p className="mono text-xs mt-2">Telegram ID: {user?.telegram?.id}</p></div>
     <p className="text-sm text-[var(--ink-500)] mb-4">{t("users.visitorHint")}</p>
-    <Button variant="primary" onClick={() => setGrant(true)}>{t("users.grantSubscription")}</Button>
+    <div className="flex gap-2"><Button variant="primary" onClick={() => setGrant(true)}>{t("users.grantSubscription")}</Button><Button variant="danger" onClick={()=>setConfirmDelete(true)}>{t("common.delete")}</Button></div>
   </Drawer>
+  <Confirm open={confirmDelete && !!user} onOpenChange={setConfirmDelete} title={t("users.deleteTitle",{n:1})} text={`${t("users.deleteText")} ${user?.name ?? ""}`} confirm={t("common.delete")} danger loading={deletion.isPending} onConfirm={()=>{if(user)deletion.mutate({ids:[user.id],action:"delete"},{onSuccess:()=>{setConfirmDelete(false);onClose();},onError:e=>toast.error(errorText(e))});}} />
   <CreateUserDrawer open={grant && !!user} onOpenChange={setGrant} account={user?.telegram ? {id:user.telegram.id,name:user.name,username:user.telegram.username} : undefined} onCreated={(id) => { setGrant(false); onCreated(id); }} />
  </>;
 }
+

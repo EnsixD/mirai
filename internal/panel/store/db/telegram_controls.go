@@ -2,6 +2,15 @@ package db
 
 import "context"
 
+// DeleteTelegramVisitor removes only an account that still has no subscriptions.
+func (q *Queries) DeleteTelegramVisitor(ctx context.Context, id int64) (int64, error) {
+	r, err := q.db.ExecContext(ctx, `DELETE FROM tg_chats c WHERE c.tg_id=$1 AND NOT EXISTS (SELECT 1 FROM tg_links l WHERE l.tg_id=c.tg_id)`, id)
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
 type AdminBotStats struct{ Accounts, Banned, Keys, Orders, Pending int64 }
 
 func (q *Queries) AdminTelegramStats(ctx context.Context) (AdminBotStats, error) {

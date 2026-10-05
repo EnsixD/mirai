@@ -606,9 +606,27 @@ func (s *Users) Bulk(ctx context.Context, ids []int64, action string, days int64
 	want := slices.Clone(ids)
 	slices.Sort(want)
 	want = slices.Compact(want)
+	visitors := []int64{}
+	for _, id := range want {
+		if id < 0 {
+			if action != BulkDelete {
+				return 0, errors.New("subscription action is unavailable for a Telegram visitor")
+			}
+			visitors = append(visitors, -id)
+		}
+	}
+	want = slices.DeleteFunc(want, func(id int64) bool { return id <= 0 })
 	done := 0
 	err := s.st.TxRC(ctx, func(q *db.Queries) error {
 		done = 0
+		for _, tgID := range visitors {
+			// A stale visitor selection must not revoke a newly issued subscription.
+			removed, err := q.DeleteTelegramVisitor(ctx, tgID)
+			if err != nil {
+				return err
+			}
+			done += int(removed)
+		}
 		lock := q.LockUserRows
 		if action == BulkDelete {
 			lock = q.LockUserRowsForDelete
@@ -644,7 +662,7 @@ func (s *Users) Bulk(ctx context.Context, ids []int64, action string, days int64
 		if err != nil {
 			return err
 		}
-		done = len(found)
+		done += len(found)
 		return nil
 	})
 	if err != nil {
