@@ -48,6 +48,21 @@ def allowed_ports(text):
                 ports.add(f'{int(match[1])}/{network}')
     return ports
 
+def configured_udp_ports(state):
+    result = set()
+    for inbound in state.get('inbounds', []):
+        config = inbound.get('config') or {}
+        if isinstance(config, str):
+            config = json.loads(config)
+        if config.get('type') != 'hysteria2':
+            continue
+        match = re.fullmatch(r'(\d+)(?:-(\d+))?', str(inbound.get('port', '')))
+        if match:
+            first, last = int(match[1]), int(match[2] or match[1])
+            if 1 <= first <= last <= 65535:
+                result.update(f'{port}/udp' for port in range(first, last + 1))
+    return result
+
 def reconcile(desired, protected, existing, managed, command):
     result = set(managed)
     for port in sorted(desired - managed):
@@ -68,6 +83,13 @@ def main():
         return
     listeners = subprocess.run(['ss', '-H', '-lntu', '-p'], capture_output=True, text=True, check=True).stdout
     desired, protected = listening_ports(listeners)
+    # Unconnected UDP sockets also appear in ss -l output. Only configured QUIC
+    # listeners need incoming rules; outbound DNS/UDP sockets must stay excluded.
+    env_path = Path('/etc/mirai/mirai.env')
+    environment = dict(line.split('=', 1) for line in env_path.read_text().splitlines() if '=' in line and not line.startswith('#'))
+    node_state = Path(environment.get('MIRAI_DATA_DIR', '/var/lib/mirai')) / 'node-state.json'
+    udp = configured_udp_ports(json.loads(node_state.read_text())) if node_state.exists() else set()
+    desired = {port for port in desired if port.endswith('/tcp') or port in udp}
     managed = set(json.loads(STATE.read_text())) if STATE.exists() else set()
     if any(not re.fullmatch(r'(?:[1-9]\d{0,4})/(?:tcp|udp)', port) or int(port.split('/')[0]) > 65535 for port in managed):
         raise ValueError('Invalid managed firewall state')

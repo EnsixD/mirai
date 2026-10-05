@@ -7,6 +7,10 @@ firewall = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(firewall)
 
 class FirewallTests(unittest.TestCase):
+    def test_udp_rules_exclude_ephemeral_outbound_sockets(self):
+        state = {'inbounds': [{'port': '443', 'config': {'type': 'vless'}}, {'port': '20000-20002', 'config': {'type': 'hysteria2'}}]}
+        self.assertEqual(firewall.configured_udp_ports(state), {'20000/udp', '20001/udp', '20002/udp'})
+
     def test_only_public_mirai_listeners_are_managed(self):
         text = '''tcp LISTEN 0 8192 *:8443 *:* users:(("mirai-node",pid=12,fd=7))
 udp UNCONN 0 0 0.0.0.0:443 0.0.0.0:* users:(("mirai-node",pid=12,fd=8))
