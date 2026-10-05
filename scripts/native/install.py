@@ -245,6 +245,14 @@ esac
         write('/etc/systemd/system/mirai-update-auto.service', '[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/mirai/update.py --auto\n')
         write('/etc/systemd/system/mirai-update.timer', '[Timer]\nOnCalendar=daily\nRandomizedDelaySec=1h\nUnit=mirai-update-auto.service\n[Install]\nWantedBy=timers.target\n')
     run('systemctl', 'daemon-reload')
+    # Keep an existing firewall enabled and permit the ports used by the presets.
+    # The panel runs without root privileges and cannot open inbound ports itself.
+    if shutil.which('ufw'):
+        firewall = subprocess.run(['ufw', 'status'], capture_output=True, text=True)
+        if firewall.returncode == 0 and 'Status: active' in firewall.stdout:
+            for port in (443, 2053, 2083, 2087, 2096, 8443):
+                run('ufw', 'allow', f'{port}/tcp', stdout=subprocess.DEVNULL)
+            run('ufw', 'allow', '443/udp', stdout=subprocess.DEVNULL)
     run('systemctl', 'enable', '--now', 'mirai-node')
     if not args.join:
         run('systemctl', 'enable', '--now', 'mirai', 'mirai-update.path', 'mirai-update.timer')

@@ -168,6 +168,7 @@ export function EditDrawer({ inbound, onClose }: { inbound: Inbound | null; onCl
   };
   return (
     <Drawer
+      presentation="modal"
       open={!!inbound}
       onOpenChange={(v) => !v && onClose()}
       title={inbound?.sub_name ?? ""}
