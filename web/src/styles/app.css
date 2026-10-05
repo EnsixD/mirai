@@ -81,10 +81,8 @@ html[data-theme="midnight"] .btn-primary:hover:not(:disabled) { background: var(
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
   #root { position: relative; isolation: isolate; min-height: 100vh; min-height: 100dvh; }
-  /* Dialogs are portalled to body: blur the actual page as well as the scrim.
-     This remains visible when the browser cannot sample the isolated root
-     through backdrop-filter. It also survives overlapping dialog lifetimes. */
-  body:has(> .scrim) > #root { filter: blur(8px); }
+  /* Portal exit animations do not keep the page blurred after closing. */
+  body[data-modal-open="true"] > #root { filter: blur(8px); }
   body {
     margin: 0; min-height: 100vh; min-height: 100dvh; font: 400 14px/20px var(--font-ui-stack); color: var(--ink-900);
     background: var(--bg); -webkit-font-smoothing: antialiased; overflow-x: hidden;
@@ -281,7 +279,8 @@ html[data-theme="midnight"] .btn-primary:hover:not(:disabled) { background: var(
   .state-mark.err { border-style: solid; border-color: var(--berry-600); color: var(--berry-600); }
 
   /* drawer */
-  .scrim { position: fixed; inset: 0; background: rgba(22, 26, 36, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 40; }
+  .scrim { position: fixed; inset: 0; background: rgba(22, 26, 36, 0.28); z-index: 40; }
+  body[data-modal-open="true"] > .scrim { backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
   .drawer { position: fixed; top: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); width: min(480px, calc(100vw - 32px)); border-radius: var(--r-xl); z-index: 50; display: flex; flex-direction: column; overflow: hidden; }
   .creation-modal { position: fixed; left: 50%; top: 50%; width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); border-radius: var(--r-xl); z-index: 50; display: flex; flex-direction: column; overflow: hidden; box-shadow: var(--shadow-lg); }
   .creation-modal .dr-head, .creation-modal .dr-foot { flex-shrink: 0; padding-left: 28px; padding-right: 28px; }

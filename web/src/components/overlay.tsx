@@ -1,9 +1,25 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { t } from "../i18n";
 import { Button } from "./ui";
+
+const openDialogs = new Set<symbol>();
+
+// Track React's open state, not exit-animation nodes left in the portal.
+function useModalBackdrop(open: boolean) {
+  useLayoutEffect(() => {
+    if (!open) return;
+    const id = Symbol();
+    openDialogs.add(id);
+    document.body.dataset.modalOpen = "true";
+    return () => {
+      openDialogs.delete(id);
+      if (openDialogs.size === 0) delete document.body.dataset.modalOpen;
+    };
+  }, [open]);
+}
 
 /** Side sheet on desktop, full-height sheet on phones. Title is required for screen readers. */
 export function Drawer({
@@ -28,6 +44,7 @@ export function Drawer({
   modalWidth?: "form" | "protocol";
 }) {
   const reduce = useReducedMotion();
+  useModalBackdrop(open);
   const modal = presentation === "modal";
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -87,6 +104,7 @@ export function Confirm({
   loading?: boolean;
   onConfirm: () => void;
 }) {
+  useModalBackdrop(open);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
