@@ -36,6 +36,16 @@ func TestLocalBotStructureAndOwnership(t *testing.T) {
 	if len(counts) != 0 {
 		t.Fatal("counted admin buttons missing")
 	}
+	for _, screen := range []string{"users:0", "subs:0"} {
+		_, list := e.bot.renderAdmin(e.ctx, 900, screen)
+		for _, row := range list.InlineKeyboard {
+			for _, button := range row {
+				if button.CallbackData == "a:search" {
+					t.Fatal("search remains in list", screen)
+				}
+			}
+		}
+	}
 	if err := e.st.Q.LinkTg(e.ctx, db.LinkTgParams{UserID: e.user.ID, TgID: 555, CreatedAt: e.clock().Unix()}); err != nil {
 		t.Fatal(err)
 	}

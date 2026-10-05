@@ -164,7 +164,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		if len(nav) > 0 {
 			rows = append(rows, nav)
 		}
-		rows = append(rows, []Button{adminButton("🔎 Найти пользователя", "search")}, adminBack())
+		rows = append(rows, adminBack())
 		title := "Пользователи"
 		if cmd == "subs" {
 			title = "Все подписки"
