@@ -85,10 +85,49 @@ type tariffOutput struct{ Body TariffView }
 type tariffsOutput struct{ Body []TariffView }
 
 func (h *handlers) registerCatalog() {
+	huma.Register(h.api, huma.Operation{OperationID: "order-tariffs", Method: http.MethodPost, Path: "/api/v1/tariffs/order", Summary: "Порядок тарифов", Tags: []string{"tariffs"}, DefaultStatus: http.StatusNoContent}, h.orderTariffs)
 	huma.Register(h.api, huma.Operation{OperationID: "list-tariffs", Method: http.MethodGet, Path: "/api/v1/tariffs", Summary: "Тарифы", Tags: []string{"tariffs"}}, h.listTariffs)
 	huma.Register(h.api, huma.Operation{OperationID: "create-tariff", Method: http.MethodPost, Path: "/api/v1/tariffs", Summary: "Создать тариф", Tags: []string{"tariffs"}, DefaultStatus: http.StatusCreated}, h.createTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "update-tariff", Method: http.MethodPut, Path: "/api/v1/tariffs/{id}", Summary: "Изменить тариф", Tags: []string{"tariffs"}}, h.updateTariff)
 	huma.Register(h.api, huma.Operation{OperationID: "delete-tariff", Method: http.MethodDelete, Path: "/api/v1/tariffs/{id}", Summary: "Удалить тариф", Tags: []string{"tariffs"}, DefaultStatus: http.StatusNoContent}, h.deleteTariff)
+}
+
+type tariffOrderInput struct {
+	Body struct {
+		IDs []int64 `json:"ids" maxItems:"10000"`
+	}
+}
+
+func (h *handlers) orderTariffs(ctx context.Context, in *tariffOrderInput) (*struct{}, error) {
+	err := h.d.Store.Tx(ctx, func(q *db.Queries) error {
+		rows, err := q.ListTariffs(ctx)
+		if err != nil {
+			return err
+		}
+		expected := make(map[int64]bool, len(rows))
+		for _, row := range rows {
+			expected[row.ID] = true
+		}
+		if len(in.Body.IDs) != len(rows) {
+			return huma.Error409Conflict("Tariff list changed; refresh it")
+		}
+		for _, id := range in.Body.IDs {
+			if !expected[id] {
+				return huma.Error409Conflict("Invalid tariff order")
+			}
+			delete(expected, id)
+		}
+		for position, id := range in.Body.IDs {
+			if err := q.SetTariffSort(ctx, id, int64(position)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &struct{}{}, nil
 }
 
 func (h *handlers) listTariffs(ctx context.Context, _ *struct{}) (*tariffsOutput, error) {

@@ -310,7 +310,6 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 	if len(devs) == 0 {
 		lines = append(lines, html.EscapeString(w.devicesNone))
 	}
-	traffic, _ := b.d.Store.Q.DeviceTrafficOf(ctx, u.ID)
 	for _, d := range devs {
 		meta := []string{}
 		if d.Hwid != "" && d.Model != "" && d.Os != "" {
@@ -320,10 +319,7 @@ func (b *Bot) devices(ctx context.Context, w *words, u db.User, cmd string, id i
 			meta = append(meta, strings.Replace(app, "/", " ", 1))
 		}
 		meta = append(meta, w.ago(time.Unix(d.LastSeen, 0), now))
-		if count, ok := traffic[d.ID]; ok {
-			meta = append(meta, fmt.Sprintf("↑ %.2f GB · ↓ %.2f GB", float64(count.Up)/(1<<30), float64(count.Down)/(1<<30)))
-		}
-		lines = append(lines, "• "+html.EscapeString(name(d))+" · "+html.EscapeString(strings.Join(meta[:len(meta)-1], " · "))+"\n"+html.EscapeString(meta[len(meta)-1]))
+
 		if policy.Single || admin {
 			rows = append(rows, []Button{{Text: "🗑 " + deviceLabel(w, d), CallbackData: "du:" + strconv.FormatInt(d.ID, 10)}})
 		}

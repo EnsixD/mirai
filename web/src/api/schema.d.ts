@@ -875,6 +875,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tariffs/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Порядок тарифов */
+        post: operations["order-tariffs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tariffs/{id}": {
         parameters: {
             query?: never;
@@ -2725,6 +2742,9 @@ export interface components {
             terms?: components["schemas"]["TermBody"][];
             /** Format: int64 */
             traffic_limit?: number;
+        };
+        TariffOrderInputBody: {
+            ids: number[];
         };
         TariffView: {
             /**
@@ -5249,6 +5269,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TariffView"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "order-tariffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TariffOrderInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

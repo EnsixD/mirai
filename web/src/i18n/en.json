@@ -599,6 +599,7 @@
     "noteSaved": "Note saved"
   },
   "tariffs": {
+    "reorder": "Drag to change the order in the bot",
     "subtitle": "Templates for granting access in one click. Changing a plan does not touch subscriptions already issued.",
     "new": "New plan",
     "emptyTitle": "No plans yet",

@@ -48,18 +48,23 @@ func TestAdminCustomerProfileAndGrant(t *testing.T) {
 	if !strings.Contains(text, "Подписки пользователя: 2") || !strings.HasPrefix(kb.InlineKeyboard[0][0].Text, "📋 #") {
 		t.Fatal("subscription list does not clearly identify subscriptions", text)
 	}
-	_, kb = e.bot.adminScreen(e.ctx, 900, fmt.Sprintf("a:user:%d", e.user.ID), "")
+	text, kb = e.bot.adminScreen(e.ctx, 900, fmt.Sprintf("a:user:%d", e.user.ID), "")
+	for _, removed := range []string{"Контакт:", "За всё время:", "Последняя активность:", "Остаток пакетов:", "↑"} {
+		if strings.Contains(text, removed) {
+			t.Fatalf("unwanted subscription detail: %s", removed)
+		}
+	}
 	back := false
 	for _, row := range kb.InlineKeyboard {
 		for _, button := range row {
-			back = back || button.CallbackData == "a:owned:555"
+			back = back || button.CallbackData == "a:subs:0"
 			if strings.HasPrefix(button.CallbackData, "a:owner:") {
 				t.Fatal("duplicate customer-profile action remains on subscription")
 			}
 		}
 	}
 	if !back {
-		t.Fatal("subscription must return to its owner's subscriptions")
+		t.Fatal("subscription must return to all subscriptions")
 	}
 	_, kb = e.bot.adminScreen(e.ctx, 900, "a:home", "")
 	for _, row := range kb.InlineKeyboard {

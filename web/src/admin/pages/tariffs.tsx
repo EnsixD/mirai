@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Trash2, Layers, Package, Pencil, Plus, Tag, X } from "lucide-react";
+import { GripVertical, Trash2, Layers, Package, Pencil, Plus, Tag, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas, type Tariff } from "../../api/client";
 import { qk, usePaymentSettings, usePools, useTariffs } from "../../api/hooks";
@@ -58,6 +58,20 @@ export function TariffsPage() {
   const [deleting, setDelete] = useState<Tariff | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
+  const [dragging, setDragging] = useState<number | null>(null);
+  const reorder = useMutation({
+    mutationFn: (ids: number[]) => unwrap(api.POST("/api/v1/tariffs/order", { body: { ids } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.tariffs }),
+    onError: (e) => toast.error(errorText(e)),
+  });
+  function moveTariff(target: number) {
+    if (dragging == null || dragging === target || reorder.isPending) return;
+    const ids = (tariffs.data ?? []).map((tr) => tr.id);
+    const from = ids.indexOf(dragging), to = ids.indexOf(target);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1); ids.splice(to, 0, dragging);
+    setDragging(null); reorder.mutate(ids);
+  }
   const remove = useMutation({
     mutationFn: (id: number) => unwrap(api.DELETE("/api/v1/tariffs/{id}", { params: { path: { id } } })),
     onSuccess: () => {
@@ -123,7 +137,7 @@ export function TariffsPage() {
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {list.map((tr, i) => (
-                    <section key={tr.id} className="card glass reveal flex flex-col" style={{ "--i": i } as React.CSSProperties}>
+                    <section key={tr.id} onDragOver={(e) => { if (dragging != null) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); moveTariff(tr.id); }} className={`card glass reveal flex flex-col ${dragging === tr.id ? "opacity-50" : ""}`} style={{ "--i": i } as React.CSSProperties}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <h2 className="font-display text-xl font-medium tracking-tight">{tr.name}</h2>
@@ -138,6 +152,9 @@ export function TariffsPage() {
                           ) : null}
                         </div>
                         <div className="flex gap-1">
+                          <button type="button" className="icon-btn cursor-grab" draggable={!reorder.isPending} aria-label={t("tariffs.reorder")} title={t("tariffs.reorder")} onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(tr.id)); e.dataTransfer.effectAllowed = "move"; setDragging(tr.id); }} onDragEnd={() => setDragging(null)}>
+                            <GripVertical size={16} />
+                          </button>
                           <button type="button" className="icon-btn" aria-label={t("tariffs.editLabel", { name: tr.name })} onClick={() => setEdit(tr)}>
                             <Pencil size={16} />
                           </button>

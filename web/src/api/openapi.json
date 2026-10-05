@@ -4061,6 +4061,23 @@
         ],
         "type": "object"
       },
+      "TariffOrderInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "TariffView": {
         "additionalProperties": false,
         "properties": {
@@ -7929,6 +7946,40 @@
           }
         },
         "summary": "Создать тариф",
+        "tags": [
+          "tariffs"
+        ]
+      }
+    },
+    "/api/v1/tariffs/order": {
+      "post": {
+        "operationId": "order-tariffs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TariffOrderInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Порядок тарифов",
         "tags": [
           "tariffs"
         ]

@@ -181,7 +181,12 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		}
 		expiry := "Без срока"
 		if u.ExpiresAt.Valid {
-			expiry = time.Unix(u.ExpiresAt.Int64, 0).UTC().Format("02.01.2006 15:04 UTC")
+			remaining := u.ExpiresAt.Int64 - b.d.Now().Unix()
+			if remaining <= 0 {
+				expiry = "Срок истёк"
+			} else {
+				expiry = fmt.Sprintf("%s · осталось %d дн.", time.Unix(u.ExpiresAt.Int64, 0).UTC().Format("02.01.2006"), (remaining+86399)/86400)
+			}
 		}
 		limit := "∞"
 		if u.TrafficLimit.Valid {
@@ -193,7 +198,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 				tariff = t.Name
 			}
 		}
-		text := fmt.Sprintf("<b>#%d · %s</b>\nСтатус: %s\nТариф: %s\nДо: %s\n\nТрафик периода: %s / %s\n↑ %s · ↓ %s\nЗа всё время: %s\nОстаток пакетов: %s", u.ID, html.EscapeString(shortAdmin(u.Name, 100)), adminState(domain.State(u, g.Main(id), b.d.Now())), html.EscapeString(shortAdmin(tariff, 100)), expiry, adminGB(u.UsedUp+u.UsedDown), limit, adminGB(u.UsedUp), adminGB(u.UsedDown), adminGB(u.TotalUp+u.TotalDown), adminGB(g.Main(id)))
+		text := fmt.Sprintf("<b>#%d · %s</b>\nСтатус: %s\nТариф: %s\nСрок: %s\n\nТрафик периода: %s / %s", u.ID, html.EscapeString(shortAdmin(u.Name, 100)), adminState(domain.State(u, g.Main(id), b.d.Now())), html.EscapeString(shortAdmin(tariff, 100)), expiry, adminGB(u.UsedUp+u.UsedDown), limit)
 		if link, e := q.TgLinkOfUser(ctx, id); e == nil {
 			text += fmt.Sprintf("\nTelegram: %d · @%s", link.TgID, html.EscapeString(link.Username))
 		}
@@ -203,12 +208,6 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 				limit = strconv.FormatInt(u.DeviceLimit.Int64, 10)
 			}
 			text += fmt.Sprintf("\nУстройства: %d / %s", len(devs), limit)
-		}
-		if u.OnlineAt.Valid {
-			text += "\nПоследняя активность: " + time.Unix(u.OnlineAt.Int64, 0).UTC().Format("02.01.2006 15:04 UTC")
-		}
-		if u.Contact != "" {
-			text += "\nКонтакт: " + html.EscapeString(shortAdmin(u.Contact, 120))
 		}
 		for i, line := range b.poolLines(ctx, wordsFor("ru"), id) {
 			if i >= 8 {
