@@ -15,10 +15,10 @@ manifest = {
     'version': version,
     'published': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'native': {},
-    'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py']},
+    'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py', 'firewall.py']},
     'notes': {
-        'ru': 'Ручная проверка и нативное обновление обходят устаревший кэш GitHub. Настройка инбаунда открывается в модальном окне. Установщик открывает порты пресетов при уже включённом UFW. Включены исправления счётчиков устройств, подписок и Telegram из 0.5.0.6.',
-        'en': 'Manual release checks and native updates bypass stale GitHub caches. Inbound settings open in a modal. The installer permits preset ports when UFW is already enabled. Includes the device counts, subscription and Telegram improvements from 0.5.0.6.',
+        'ru': 'Автоматическое открытие и закрытие портов активных инбаундов в UFW с сохранением SSH и правил других сервисов. Проверка обновлений обходит кэш GitHub. Настройка инбаундов в модальном окне; включены улучшения Telegram и счётчиков из 0.5.0.6.',
+        'en': 'Automatically open and close UFW ports for active inbounds while preserving SSH and other services. Release checks bypass GitHub caches. Inbound settings use a modal; includes Telegram and device-count improvements from 0.5.0.6.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

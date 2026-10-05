@@ -146,6 +146,15 @@ def main():
             if hashlib.sha256(updater).hexdigest() != manifest['files']['update.py']:
                 raise ValueError('Updater checksum mismatch')
             (work / 'new/update.py').write_bytes(updater)
+            if 'firewall.py' in manifest['files']:
+                firewall = fetch(asset['url'].rsplit('/', 1)[0] + '/firewall.py')
+                if hashlib.sha256(firewall).hexdigest() != manifest['files']['firewall.py']:
+                    raise ValueError('Firewall helper checksum mismatch')
+                pending = ROOT / 'firewall.py.new'
+                pending.write_bytes(firewall)
+                pending.chmod(0o755)
+                pending.replace(ROOT / 'firewall.py')
+                run('python3', str(ROOT / 'firewall.py'), '--install-service')
             backup = Path('/var/backups/mirai') / datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
             backup.mkdir(parents=True, mode=0o700)
             for name in ('mirai', 'mirai-node', 'VERSION', 'update.py'):

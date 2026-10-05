@@ -69,6 +69,7 @@ jobs:
           go test ./internal/panel/autotune -run '^TestCutOff$'
           go test ./internal/panel/cli -run '^TestHealthChecksTheDatabase$'
           python3 scripts/native/test_update.py
+          python3 scripts/native/test_firewall.py
       - name: Build Linux binaries
         env:
           CGO_ENABLED: '0'
@@ -83,7 +84,7 @@ jobs:
             name=x86_64; [ "$arch" != arm64 ] || name=aarch64
             tar -czf "dist/mirai-linux-$name.tar.gz" -C dist/native mirai mirai-node VERSION
           done
-          cp scripts/native/install.py scripts/native/update.py scripts/native/install.sh dist/
+          cp scripts/native/install.py scripts/native/update.py scripts/native/firewall.py scripts/native/install.sh dist/
       - name: Sign and verify manifest
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
@@ -94,4 +95,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "Mirai $RELEASE_VERSION — native Linux" --generate-notes --latest dist/mirai-linux-*.tar.gz dist/manifest.json dist/manifest.json.sig dist/install.sh dist/install.py dist/update.py
+          gh release create "$GITHUB_REF_NAME" --title "Mirai $RELEASE_VERSION — native Linux" --generate-notes --latest dist/mirai-linux-*.tar.gz dist/manifest.json dist/manifest.json.sig dist/install.sh dist/install.py dist/update.py dist/firewall.py
