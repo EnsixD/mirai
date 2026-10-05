@@ -41,6 +41,12 @@ func TestSeedLeavesCatalogEmpty(t *testing.T) {
 		if len(tariffs) != 0 {
 			t.Fatalf("seed created %d tariffs", len(tariffs))
 		}
+		for _, table := range []string{"users", "tg_chats", "payments", "bound_devices"} {
+			var count int
+			if err := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("fresh installation contains customer data in %s: %d %v", table, count, err)
+			}
+		}
 		st.Close()
 	}
 }
