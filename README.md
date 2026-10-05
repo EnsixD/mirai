@@ -88,6 +88,8 @@ Configuration lives in `/etc/mirai/mirai.env`, runtime data in `/var/lib/mirai`,
 
 The bot runs inside the panel. Add a BotFather token and your numeric administrator ID in **Telegram**. Admin actions check that ID on every request.
 
+Upload a PNG or JPEG banner in Telegram settings. The banner stays above one editable screen while users navigate; long instructions are kept in full. Administrator actions notify the account owner about grants, extensions, device limits, access changes, and closed orders. These notices can be disabled in the panel.
+
 ```text
 /start → VPN description
          🛒 Buy · 🔄 Renew
@@ -119,7 +121,7 @@ Traffic for devices bound to distinct HWID slots is displayed in the panel, subs
 
 ## Updates
 
-Native releases use `native-vX.Y.Z.R` and include both architectures. The settings icon indicates an available panel update.
+Mirai starts at **5.0.0**. Native releases use `native-vX.Y.Z` and include both architectures. The settings icon indicates an available panel update.
 
 The updater verifies an **Ed25519-signed manifest** and archive SHA-256, backs up binaries and PostgreSQL, then restarts services. A failed health check triggers restoration of the saved installation and database. Backups remain in `/var/backups/mirai`. Automatic updates are disabled by default and can be enabled in Settings.
 

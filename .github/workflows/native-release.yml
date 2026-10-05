@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - name: Validate tag and main ancestry
         run: |
-          [[ "$GITHUB_REF_NAME" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$GITHUB_REF_NAME" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           echo "RELEASE_VERSION=${GITHUB_REF_NAME#native-v}" >> "$GITHUB_ENV"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -69,7 +69,7 @@ jobs:
           go test ./internal/panel/domain -run '^TestTariffLimitsPropagateWithoutResettingPaidTime$'
           go test ./internal/panel/domain -run '^TestSeedLeavesCatalogEmpty$'
           go test ./internal/panel/tgbot -run '^TestKeyboardWireGridPreservesActions$'
-          go test ./internal/panel/tgbot -run '^Test(LocalBotStructureAndOwnership|AdminAccountBanAndDeletion|AdminDeviceNavigationAndRevokedPermission|AdminAccess|AdminSubscriptionLifecycle)$'
+          go test ./internal/panel/tgbot -run '^Test(LocalBotStructureAndOwnership|AdminAccountBanAndDeletion|AdminDeviceNavigationAndRevokedPermission|AdminAccess|AdminSubscriptionLifecycle|BannerScreensAndInstructionRows|AdministratorChangeNotice)$'
           go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'
           go test ./internal/proto -run '^TestMiraiTransportSafety$'
           go test ./internal/panel/subs -run '^TestXHTTPUDPFailClosed$'
