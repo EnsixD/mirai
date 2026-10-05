@@ -111,7 +111,9 @@ def main():
                 '-rawin', '-in', str(work / 'manifest.json'), '-sigfile', str(work / 'signature'), stdout=subprocess.DEVNULL)
             manifest = json.loads(raw)
             version = manifest['version']
-            if tuple(map(int, version.split('.'))) <= tuple(map(int, previous.split('.'))):
+            # Correct the accidentally published initial version without enabling arbitrary downgrades.
+            baseline_correction = previous == '5.0.0' and version == '0.5.0'
+            if not baseline_correction and tuple(map(int, version.split('.'))) <= tuple(map(int, previous.split('.'))):
                 write_status('ok', previous, previous)
                 sys.exit(0)
             arch = {'x86_64': 'x86_64', 'aarch64': 'aarch64'}[platform.machine()]

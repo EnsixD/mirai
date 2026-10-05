@@ -121,7 +121,7 @@ Traffic for devices bound to distinct HWID slots is displayed in the panel, subs
 
 ## Updates
 
-Mirai starts at **5.0.0**. Native releases use `native-vX.Y.Z` and include both architectures. The settings icon indicates an available panel update.
+Mirai starts at **0.5.0**. Native releases use `native-vX.Y.Z` and include both architectures. The settings icon indicates an available panel update.
 
 The updater verifies an **Ed25519-signed manifest** and archive SHA-256, backs up binaries and PostgreSQL, then restarts services. A failed health check triggers restoration of the saved installation and database. Backups remain in `/var/backups/mirai`. Automatic updates are disabled by default and can be enabled in Settings.
 
