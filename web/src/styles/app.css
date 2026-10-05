@@ -81,6 +81,10 @@ html[data-theme="midnight"] .btn-primary:hover:not(:disabled) { background: var(
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
   #root { position: relative; isolation: isolate; min-height: 100vh; min-height: 100dvh; }
+  /* Dialogs are portalled to body: blur the actual page as well as the scrim.
+     This remains visible when the browser cannot sample the isolated root
+     through backdrop-filter. It also survives overlapping dialog lifetimes. */
+  body:has(> .scrim) > #root { filter: blur(8px); }
   body {
     margin: 0; min-height: 100vh; min-height: 100dvh; font: 400 14px/20px var(--font-ui-stack); color: var(--ink-900);
     background: var(--bg); -webkit-font-smoothing: antialiased; overflow-x: hidden;
