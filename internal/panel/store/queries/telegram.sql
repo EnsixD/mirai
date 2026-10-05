@@ -36,11 +36,11 @@ SELECT l.tg_id, COALESCE(c.username, '') AS username, COALESCE(c.first_name, '')
 FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE l.user_id = $1;
 
 -- name: CountTgChats :one
-SELECT COUNT(DISTINCT tg_id) FROM tg_links;
+SELECT COUNT(*) FROM tg_chats;
 
 -- name: BroadcastTargets :many
 -- Accounts with a linked subscription that did not block the bot.
-SELECT DISTINCT l.tg_id FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE COALESCE(c.blocked, 0) = 0;
+SELECT c.tg_id FROM tg_chats c WHERE c.blocked=0 AND NOT EXISTS(SELECT 1 FROM tg_account_controls a WHERE a.tg_id=c.tg_id AND a.banned) ORDER BY c.tg_id;
 
 -- name: AddTgNotice :execrows
 INSERT INTO tg_notices (user_id, kind, period, sent_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING;

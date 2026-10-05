@@ -162,6 +162,10 @@ func (s *Users) createTx(ctx context.Context, q *db.Queries, in CreateInput, any
 		if err := q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: in.TelegramID, CreatedAt: now}); err != nil {
 			return u, err
 		}
+		u, err = q.GetUser(ctx, u.ID)
+		if err != nil {
+			return u, err
+		}
 	}
 	return u, ApplyTariffPools(ctx, q, u.ID, t.ID)
 }
@@ -524,6 +528,30 @@ func (s *Users) Delete(ctx context.Context, id int64) error {
 	err := s.st.Tx(ctx, func(q *db.Queries) error { return s.deleteOn(ctx, q, id) })
 	if err == nil {
 		s.changes.PoliciesChanged()
+	}
+	return err
+}
+
+// DeleteTelegramAccount revokes all of the account's keys atomically, retaining receipts.
+func (s *Users) DeleteTelegramAccount(ctx context.Context, tgID int64) error {
+	err := s.st.Tx(ctx, func(q *db.Queries) error {
+		keys, err := q.ListTgLinksOf(ctx, tgID)
+		if err != nil {
+			return err
+		}
+		ids := make([]int64, 0, len(keys))
+		for _, key := range keys {
+			ids = append(ids, key.ID)
+		}
+		if len(ids) > 0 {
+			if err := deleteUsers(ctx, q, ids, s.now().Unix()); err != nil {
+				return err
+			}
+		}
+		return q.DeleteTelegramAccount(ctx, tgID)
+	})
+	if err == nil {
+		s.Changed()
 	}
 	return err
 }

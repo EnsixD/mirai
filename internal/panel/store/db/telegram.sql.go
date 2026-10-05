@@ -34,7 +34,7 @@ func (q *Queries) AddTgNotice(ctx context.Context, arg AddTgNoticeParams) (int64
 }
 
 const broadcastTargets = `-- name: BroadcastTargets :many
-SELECT DISTINCT l.tg_id FROM tg_links l LEFT JOIN tg_chats c ON c.tg_id = l.tg_id WHERE COALESCE(c.blocked, 0) = 0
+SELECT c.tg_id FROM tg_chats c WHERE c.blocked=0 AND NOT EXISTS(SELECT 1 FROM tg_account_controls a WHERE a.tg_id=c.tg_id AND a.banned) ORDER BY c.tg_id
 `
 
 // Accounts with a linked subscription that did not block the bot.
@@ -62,7 +62,7 @@ func (q *Queries) BroadcastTargets(ctx context.Context) ([]int64, error) {
 }
 
 const countTgChats = `-- name: CountTgChats :one
-SELECT COUNT(DISTINCT tg_id) FROM tg_links
+SELECT COUNT(*) FROM tg_chats
 `
 
 func (q *Queries) CountTgChats(ctx context.Context) (int64, error) {
