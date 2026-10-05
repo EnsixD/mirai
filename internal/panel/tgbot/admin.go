@@ -402,13 +402,13 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 				label = fmt.Sprintf("%s (%d)", label, stats.Pending)
 			}
 			entry := adminButton(label, target)
-			if button.Row && len(rows) > 0 && len(rows[len(rows)-1]) < 3 {
+			if len(rows) > 0 && len(rows[len(rows)-1]) < 2 {
 				rows[len(rows)-1] = append(rows[len(rows)-1], entry)
 			} else {
 				rows = append(rows, []Button{entry})
 			}
 		}
-		rows = append(rows, []Button{{Text: "← Меню бота", CallbackData: "m"}})
+		rows = append(rows, []Button{{Text: "Меню", CallbackData: "m"}})
 		text := "⚙️ <b>Админ-панель</b>"
 		if config.Statistics {
 			text += fmt.Sprintf("\n\n👥 Пользователи: <b>%d</b> · заблокированы: <b>%d</b>\n🔑 Ключи: <b>%d</b> · активные: <b>%d</b>\n🧾 Заказы: <b>%d</b> · ожидают оплаты: <b>%d</b>\n\nИстекают: %d · истекли: %d · лимит: %d", stats.Accounts, stats.Banned, stats.Keys, counts.Active+counts.Expiring, stats.Orders, stats.Pending, counts.Expiring, counts.Expired, counts.Limited)
