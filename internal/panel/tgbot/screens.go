@@ -23,9 +23,35 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 	if strings.HasPrefix(data, "a:") {
 		return b.adminScreen(ctx, chat, data, notice)
 	}
+	if gate := b.botGate(ctx, chat); gate != "" {
+		return gate, nil
+	}
 	w := wordsFor(cfg.Lang)
 	list, u, ok := b.subs(ctx, chat)
 	cmd, arg, _ := strings.Cut(data, ":")
+	if cmd == "help" {
+		return b.instruction(ctx, cfg)
+	}
+	if cmd == "orders" {
+		return b.ordersScreen(ctx, chat, arg, false)
+	}
+	if cmd == "order" {
+		id, _ := strconv.ParseInt(arg, 10, 64)
+		return b.orderScreen(ctx, chat, id, false)
+	}
+	if cmd == "r" {
+		rows := [][]Button{}
+		for _, sub := range list {
+			rows = append(rows, []Button{{Text: "🔑 " + shortAdmin(sub.Name, 48), CallbackData: "renewselect:" + strconv.FormatInt(sub.ID, 10)}})
+		}
+		rows = append(rows, []Button{{Text: "← Меню", CallbackData: "m"}})
+		text := "🔄 <b>Продление</b>\n\nВыберите подписку, которую нужно продлить. Оплаченные дни добавятся к её оставшемуся сроку."
+		if len(list) == 0 {
+			text = "🔄 <b>Продление</b>\n\nУ вас пока нет подписок — продлевать нечего."
+			rows = [][]Button{{{Text: "🛒 Купить", CallbackData: "b"}, {Text: "← Меню", CallbackData: "m"}}}
+		}
+		return text, &Keyboard{rows}
+	}
 	if cmd == "b" {
 		text, kb := b.shopList(ctx, w, w.buyTitle, "tn", notice, []Button{{Text: w.back, CallbackData: "m"}})
 		if b.d.Billing != nil && b.d.Billing.TrialOpen(ctx, chat) {
@@ -114,7 +140,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 			rows = append(rows, []Button{btn})
 		}
 		return withNotice(text), &Keyboard{append(rows, back)}
-	case "r":
+	case "rr":
 		if offers, _ := b.offers(ctx); len(offers) > 0 {
 			text, kb := b.shopList(ctx, w, fmt.Sprintf(w.renewTitle, u.Name), "t", notice, nil)
 			text = render(pick(cfg.Texts.Renew, w.renew), vars) + "\n\n" + text
@@ -145,7 +171,7 @@ func (b *Bot) screen(ctx context.Context, cfg Config, chat int64, data, notice s
 		lines := []string{"<b>📋 Мои подписки</b>", "", "Выберите подписку, чтобы посмотреть срок, трафик, ссылку для подключения и устройства."}
 		end := min((page+1)*8, len(list))
 		for _, subscription := range list[page*8 : end] {
-			rows = append(rows, []Button{{Text: "📋 " + subscription.Name, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
+			rows = append(rows, []Button{{Text: "🔑 " + subscription.SubToken, CallbackData: "u:" + strconv.FormatInt(subscription.ID, 10)}})
 		}
 		nav := []Button{}
 		if page > 0 {
@@ -207,6 +233,8 @@ func (b *Bot) menu(ctx context.Context, cfg Config, w *words, subs int) *Keyboar
 			btn = Button{Text: mb.Label, CallbackData: "pf"}
 		case "buy":
 			btn = Button{Text: mb.Label, CallbackData: "b"}
+		case "help":
+			btn = Button{Text: mb.Label, CallbackData: "help"}
 		case "devices":
 			btn = Button{Text: mb.Label, CallbackData: "d"}
 		case "connect":
@@ -331,9 +359,23 @@ func deviceName(w *words, d db.BoundDevice) string {
 // says which screen to draw after it, with a line on top. A tap's effect never waits in
 // the outbox: only its screen does, and a later tap may replace that.
 func (b *Bot) act(ctx context.Context, chat int64, data string) (screen, notice string) {
+	if gate := b.botGate(ctx, chat); gate != "" {
+		return "m", ""
+	}
 	cmd, arg, _ := strings.Cut(data, ":")
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	switch cmd {
+	case "ordercheck", "orderclose":
+		return b.orderAction(ctx, chat, id, false, cmd == "orderclose")
+	case "renewselect":
+		list, _, _ := b.subs(ctx, chat)
+		for _, sub := range list {
+			if sub.ID == id {
+				_ = b.d.Store.Q.SetTgCurrent(ctx, db.SetTgCurrentParams{Current: id, TgID: chat})
+				return "rr", ""
+			}
+		}
+		return "r", "Подписка не найдена."
 	case "dua":
 		_, u, ok := b.subs(ctx, chat)
 		if !ok {

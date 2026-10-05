@@ -222,7 +222,9 @@ func (b *Bot) shopInvoice(ctx context.Context, w *words, chat, userID int64, arg
 		}
 	}
 	text := fmt.Sprintf(w.invoice, html.EscapeString(name), html.EscapeString(w.price(p.Amount, p.Currency)), done)
-	return text, &Keyboard{[][]Button{{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}}, back}}
+	return text, &Keyboard{[][]Button{
+		{{Text: fmt.Sprintf(w.payButton, w.price(p.Amount, p.Currency)), URL: p.PayUrl}, {Text: "✅ Проверить оплату", CallbackData: "ordercheck:" + strconv.FormatInt(p.ID, 10)}},
+		{{Text: "🧾 Мои заказы", CallbackData: "orders"}, {Text: "🗑 Закрыть заказ", CallbackData: "orderclose:" + strconv.FormatInt(p.ID, 10)}}, back}}
 }
 
 func (w *words) payError(err error) string {

@@ -66,7 +66,7 @@ func (b *Bot) takeAdminConfirmation(chat int64, nonce string) (adminFlow, bool) 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	f, ok := b.adminFlows[chat]
-	if !ok || f.Nonce != nonce || !f.Expires.After(b.d.Now()) || !(f.Kind == "delete" || f.Kind == "extend" && f.Days > 0 || f.Kind == "create") {
+	if !ok || f.Nonce != nonce || !f.Expires.After(b.d.Now()) || !(f.Kind == "delete" || f.Kind == "extend" && f.Days != 0 || f.Kind == "create" || f.Kind == "account-delete" || f.Kind == "trial-reset" || f.Kind == "maintenance" || f.Kind == "broadcast-send") {
 		return adminFlow{}, false
 	}
 	delete(b.adminFlows, chat)
@@ -88,6 +88,9 @@ func (b *Bot) adminScreen(ctx context.Context, chat int64, data, notice string) 
 }
 
 func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string, *Keyboard) {
+	if text, kb, handled := b.adminNavigationScreen(ctx, chat, data); handled {
+		return text, kb
+	}
 	cmd, arg, _ := strings.Cut(data, ":")
 	id, _ := strconv.ParseInt(arg, 10, 64)
 	q := b.d.Store.Q
@@ -215,11 +218,23 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			text += "\n" + html.EscapeString(shortAdmin(line, 140))
 		}
 		frozen := u.Status == "disabled"
-		freezeLabel, freezeAction := "⏸ Заморозить", "freeze"
+		freezeLabel, freezeAction := "🔴 Деактивировать", "freeze"
 		if frozen {
-			freezeLabel, freezeAction = "▶ Разморозить", "unfreeze"
+			freezeLabel, freezeAction = "🟢 Активировать", "unfreeze"
 		}
-		rows := [][]Button{{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id)), adminButton("📅 Продлить", fmt.Sprintf("extend:%d", id))}, {adminButton("🔗 Ссылка", fmt.Sprintf("link:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))}}
+		devices, _ := q.CountBoundDevices(ctx, id)
+		deviceLimit := "∞"
+		if u.DeviceLimit.Valid {
+			deviceLimit = strconv.FormatInt(u.DeviceLimit.Int64, 10)
+		}
+		if url := b.subURL(ctx, u); url != "" {
+			text += "\n\n🔗 <b>Ссылка</b>\n<code>" + html.EscapeString(url) + "</code>"
+		}
+		rows := [][]Button{
+			{adminButton("⏳ Продлить", fmt.Sprintf("extend:%d", id)), adminButton("📱 Лимит: "+deviceLimit, fmt.Sprintf("limit:%d", id))},
+			{adminButton(freezeLabel, fmt.Sprintf("%s:%d", freezeAction, id))},
+			{adminButton(fmt.Sprintf("📱 Устройства (%d)", devices), fmt.Sprintf("devices:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("delete:%d", id))},
+		}
 		if link, err := q.TgLinkOfUser(ctx, id); err == nil {
 			rows = append(rows, []Button{adminButton("← Подписки пользователя", fmt.Sprintf("owned:%d", link.TgID))})
 		} else {
@@ -255,11 +270,27 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		cfg.Lang = "ru"
 		text, _ := b.customerProfile(ctx, cfg, id, subscriptions)
 		rows := [][]Button{}
-		rows = append(rows, []Button{adminButton(fmt.Sprintf("📋 Подписки пользователя (%d)", len(subscriptions)), fmt.Sprintf("owned:%d", id))})
 		if cfg.Admin.Grant {
-			rows = append(rows, []Button{adminButton("🎁 Выдать подписку", fmt.Sprintf("grant:%d", id))})
+			rows = append(rows, []Button{adminButton("🎁 Выдать", fmt.Sprintf("grant:%d", id))})
 		}
-		return text, adminKB(append(rows, []Button{adminButton("← Пользователи", "users:0")}, adminBack())...)
+		rows = append(rows, []Button{adminButton(fmt.Sprintf("🔑 Ключи (%d)", len(subscriptions)), fmt.Sprintf("owned:%d", id))})
+		account, _ := q.GetTgChat(ctx, id)
+		text += "\n\nПришёл: " + time.Unix(account.CreatedAt, 0).UTC().Format("02.01.2006")
+		used, _ := q.AccountTrialUsed(ctx, id)
+		trial := "доступна"
+		if used {
+			trial = "использована"
+			rows = append(rows, []Button{adminButton("♻️ Сбросить пробную", fmt.Sprintf("trial-reset:%d", id))})
+		}
+		text += "\n🎁 Пробная: " + trial
+		banned, _ := q.AccountBanned(ctx, id)
+		banLabel := "🚫 Заблокировать"
+		if banned {
+			banLabel = "✅ Разблокировать"
+			text += "\n\n🚫 <b>Заблокирован</b>"
+		}
+		rows = append(rows, []Button{adminButton(banLabel, fmt.Sprintf("ban:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("account-delete:%d", id))})
+		return text, adminKB(append(rows, []Button{adminButton("← Пользователи", "users:0"), adminButton("⚙️ Админка", "home")})...)
 	case "owned":
 		subscriptions, err := q.ListTgLinksOf(ctx, id)
 		if err != nil {
@@ -323,18 +354,30 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		case "delete":
 			text = fmt.Sprintf("Удалить подписку #%d? Ссылка и доступ перестанут работать.", f.UserID)
 		case "extend":
-			text = fmt.Sprintf("Продлить подписку #%d на %d дней? Подписка будет включена.", f.UserID, f.Days)
+			text = fmt.Sprintf("Изменить срок подписки #%d на %+d дней? Подписка будет включена, если аккаунт не заблокирован.", f.UserID, f.Days)
 		case "create":
 			text = fmt.Sprintf("Выдать новую подписку %s Telegram ID %d на %d дней?", html.EscapeString(f.Name), f.TgID, f.Days)
 		}
-		return text, adminKB([]Button{adminButton("✅ Подтвердить", "commit:"+f.Nonce)}, []Button{adminButton("Отмена", "home")})
+		cancel := "home"
+		if f.UserID > 0 {
+			cancel = fmt.Sprintf("user:%d", f.UserID)
+		} else if f.TgID > 0 {
+			cancel = fmt.Sprintf("contact:%d", f.TgID)
+		}
+		return text, adminKB([]Button{adminButton("✅ Подтвердить", "commit:"+f.Nonce), adminButton("Отмена", cancel)})
 	case "prompt":
 		f, ok := b.adminFlow(chat, false)
 		if !ok {
 			return "Действие истекло.", adminKB(adminBack())
 		}
-		text := map[string]string{"search": "Введите ID подписки или часть имени пользователя.", "extend": "Введите количество дней продления (1–36500).", "recipient": "Введите числовой Telegram ID пользователя. Он должен сначала написать /start боту.", "name": "Введите название новой подписки (1–60 символов).", "days": "Введите срок новой подписки в днях (1–36500)."}[f.Kind]
-		return text, adminKB([]Button{adminButton("Отмена", "home")})
+		text := map[string]string{"search": "Введите ID подписки или часть имени пользователя.", "extend": "⏳ Введите количество дней для изменения срока (от -36500 до 36500, кроме 0). Отрицательное число сокращает срок.", "recipient": "Введите числовой Telegram ID пользователя. Он должен сначала написать /start боту.", "name": "Введите название новой подписки (1–60 символов).", "days": "🎁 Введите срок новой подписки в днях (1–36500)."}[f.Kind]
+		back := "home"
+		if f.UserID > 0 {
+			back = fmt.Sprintf("user:%d", f.UserID)
+		} else if f.TgID > 0 {
+			back = fmt.Sprintf("contact:%d", f.TgID)
+		}
+		return text, adminKB([]Button{adminButton("Назад", back), adminButton("⚙️ Админка", "home")})
 	default:
 		counts, err := domain.CountStates(ctx, q, b.d.Now())
 		if err != nil {
@@ -346,7 +389,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			if !button.On {
 				continue
 			}
-			target := map[string]string{"users": "users:0", "subscriptions": "subs:0", "search": "search"}[button.Action]
+			target := map[string]string{"users": "users:0", "subscriptions": "subs:0", "search": "search", "orders": "orders:0", "broadcast": "broadcast", "maintenance": "maintenance", "refresh": "home"}[button.Action]
 			if target == "" {
 				continue
 			}
@@ -358,10 +401,12 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			}
 		}
 		rows = append(rows, []Button{{Text: "← Меню бота", CallbackData: "m"}})
-		text := "<b>⚙ Администрирование mirai</b>"
+		stats, _ := q.AdminTelegramStats(ctx)
+		text := "⚙️ <b>Админ-панель</b>"
 		if config.Statistics {
-			text += fmt.Sprintf("\nАктивные: %d · Истекают: %d\nИстекли: %d · Лимит: %d · Заморожены: %d", counts.Active, counts.Expiring, counts.Expired, counts.Limited, counts.Disabled)
+			text += fmt.Sprintf("\n\n👥 Пользователи: <b>%d</b> · заблокированы: <b>%d</b>\n🔑 Ключи: <b>%d</b> · активные: <b>%d</b>\n🧾 Заказы: <b>%d</b> · ожидают оплаты: <b>%d</b>\n\nИстекают: %d · истекли: %d · лимит: %d", stats.Accounts, stats.Banned, stats.Keys, counts.Active+counts.Expiring, stats.Orders, stats.Pending, counts.Expiring, counts.Expired, counts.Limited)
 		}
+		text += "\n\n<i>Обновлено " + b.d.Now().UTC().Format("15:04:05 UTC") + "</i>"
 		return text, adminKB(rows...)
 	}
 }
@@ -381,8 +426,12 @@ func (b *Bot) adminPress(ctx context.Context, c *Client, out *Outbox, q *Callbac
 		return
 	}
 	data, notice := q.Data, ""
+	if target, message, handled := b.adminNavigationAction(ctx, chat, cmd, arg); handled {
+		data, notice = target, message
+		cmd = ""
+	}
 	switch cmd {
-	case "home", "users", "subs", "user", "search", "grant", "extend", "delete", "freeze", "unfreeze", "link":
+	case "home", "users", "subs", "user", "contact", "owned", "devices", "orders", "order", "search", "grant", "extend", "delete", "freeze", "unfreeze", "link":
 		b.adminFlow(chat, true)
 	}
 	switch cmd {
@@ -436,7 +485,11 @@ func (b *Bot) adminPress(ctx context.Context, c *Client, out *Outbox, q *Callbac
 			break
 		}
 		f.TariffID = id
-		f.Kind = "name"
+		f.Kind = "days"
+		f.Name = t.Name
+		if account, err := b.d.Store.Q.GetTgChat(ctx, f.TgID); err == nil && account.FirstName != "" {
+			f.Name = shortAdmin(account.FirstName, 60)
+		}
 		b.setAdminFlow(chat, f)
 		data = "a:prompt"
 	case "commit":
@@ -550,14 +603,39 @@ func (b *Bot) adminMessage(ctx context.Context, out *Outbox, m *Message) bool {
 			b.setAdminFlow(chat, f)
 		case "days", "extend":
 			days, err := strconv.ParseInt(text, 10, 64)
-			if err != nil || days < 1 || days > 36500 {
-				notice = "Введите целое число дней от 1 до 36500."
+			if err != nil || days == 0 || days > 36500 || days < -36500 || f.Kind == "days" && days < 1 {
+				notice = "Введите допустимое целое число дней: положительное для выдачи, отрицательное — только для сокращения срока."
 				break
 			}
 			f.Days = days
 			if f.Kind == "days" {
 				f.Kind = "create"
 			}
+			b.setAdminFlow(chat, f)
+			data = "a:confirm"
+		case "devices":
+			limit, err := strconv.ParseInt(text, 10, 64)
+			if err != nil || limit < 0 || limit > 10000 {
+				notice = "Введите целое число от 0 до 10000."
+				break
+			}
+			patch := domain.Patch{DeviceLimit: &limit}
+			if limit == 0 {
+				patch = domain.Patch{ClearDeviceLimit: true}
+			}
+			_, err = b.d.Users.Update(ctx, f.UserID, patch)
+			if err == nil {
+				b.adminFlow(chat, true)
+				b.adminAudit(ctx, chat, "device-limit", f.UserID, limit)
+			}
+			data = fmt.Sprintf("a:user:%d", f.UserID)
+			notice = adminResult(err, "Лимит устройств сохранён.")
+		case "broadcast":
+			if len([]rune(text)) == 0 || len([]rune(text)) > 3000 {
+				notice = "Текст должен содержать 1–3000 символов."
+				break
+			}
+			f.Kind, f.Name = "broadcast-send", text
 			b.setAdminFlow(chat, f)
 			data = "a:confirm"
 		default:
@@ -575,6 +653,9 @@ func (b *Bot) adminMessage(ctx context.Context, out *Outbox, m *Message) bool {
 func (b *Bot) commitAdmin(ctx context.Context, out *Outbox, chat int64, f adminFlow) (string, string) {
 	if !b.isAdmin(ctx, chat, chat) || b.d.Users == nil {
 		return "a:home", "Управление недоступно."
+	}
+	if data, notice, handled := b.commitAdminNavigation(ctx, chat, f); handled {
+		return data, notice
 	}
 	switch f.Kind {
 	case "delete":
@@ -655,6 +736,12 @@ func (b *Bot) adminSectionAllowed(ctx context.Context, chat int64, data string) 
 	}
 	cmd, _, _ := strings.Cut(data, ":")
 	switch cmd {
+	case "orders", "order", "ordercheck", "orderclose", "orderrestore":
+		return b.adminMenuActionEnabled(ctx, "orders")
+	case "broadcast":
+		return b.adminMenuActionEnabled(ctx, "broadcast")
+	case "maintenance", "mainttoggle":
+		return b.adminMenuActionEnabled(ctx, "maintenance")
 	case "users":
 		return cfg.Users
 	case "contact", "owner", "owned":
@@ -665,11 +752,21 @@ func (b *Bot) adminSectionAllowed(ctx context.Context, chat int64, data string) 
 		return cfg.Search
 	case "grant", "tariffs", "tariff":
 		return cfg.Grant
-	case "user", "extend", "delete", "freeze", "unfreeze", "link":
+	case "user", "extend", "delete", "freeze", "unfreeze", "link", "devices", "unbind", "clear", "limit":
 		return cfg.Users || cfg.Subscriptions || cfg.Search
-	case "confirm", "ok", "prompt":
+	case "ban", "account-delete", "trial-reset":
+		return cfg.Users
+	case "confirm", "ok", "prompt", "commit":
 		if flow, ok := b.adminFlow(chat, false); ok {
 			switch flow.Kind {
+			case "devices":
+				return cfg.Users || cfg.Subscriptions || cfg.Search
+			case "account-delete", "trial-reset":
+				return cfg.Users
+			case "maintenance":
+				return b.adminMenuActionEnabled(ctx, "maintenance")
+			case "broadcast", "broadcast-send":
+				return b.adminMenuActionEnabled(ctx, "broadcast")
 			case "recipient", "tariff", "name", "days", "create":
 				return cfg.Grant
 			case "search":
@@ -677,6 +774,10 @@ func (b *Bot) adminSectionAllowed(ctx context.Context, chat int64, data string) 
 			case "extend", "delete":
 				return cfg.Users || cfg.Subscriptions
 			}
+		}
+		// An already consumed confirmation still receives an expiry response.
+		if cmd == "commit" {
+			return true
 		}
 		return false
 	default:

@@ -195,7 +195,7 @@ var (
 	ErrOff  = errors.New("bot_off")
 )
 
-// Broadcast queues the admin's text for every account with a subscription and returns
+// Broadcast queues the admin's text for every reachable, non-banned account and returns
 // how many will get it. The outbox sends it at 20 messages a second at most, after the
 // replies and the notices; the admin panel shows the progress.
 func (b *Bot) Broadcast(ctx context.Context, text string) (int, error) {

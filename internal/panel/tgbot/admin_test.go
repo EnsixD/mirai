@@ -109,7 +109,7 @@ func TestAdminSubscriptionLifecycle(t *testing.T) {
 	}
 	before := u.ExpiresAt.Int64
 	adminTap(e, fmt.Sprintf("a:extend:%d", id))
-	adminSay(e, "-5")
+	adminSay(e, "0")
 	f, _ := e.bot.adminFlow(900, false)
 	if f.Days != 0 {
 		t.Fatal("invalid extension accepted")
@@ -147,7 +147,6 @@ func TestAdminGrantAndExpiry(t *testing.T) {
 	adminTap(e, "a:grant:555")
 	tariffs, _ := e.st.Q.ListTariffs(e.ctx)
 	adminTap(e, fmt.Sprintf("a:tariff:%d", tariffs[1].ID))
-	adminSay(e, "Подарок <test>")
 	adminSay(e, "9")
 	at := e.clock()
 	confirm := adminConfirm(e)
@@ -157,7 +156,7 @@ func TestAdminGrantAndExpiry(t *testing.T) {
 		t.Fatalf("grant links: %v %v", links, err)
 	}
 	u := links[0]
-	if u.Name != "Подарок <test>" || u.ExpiresAt.Int64 != at.Add(2*time.Second+9*24*time.Hour).Unix() {
+	if u.Name != "Anna" || u.ExpiresAt.Int64 != at.Add(2*time.Second+9*24*time.Hour).Unix() {
 		t.Fatalf("grant: %+v", u)
 	}
 	adminTap(e, confirm)

@@ -18,6 +18,8 @@ func TestNativeYooKassaAutomaticIssueAndModeSwitch(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	previous := http.DefaultTransport
+	providerPaid := true
+	invoices := 0
 	defer func() { http.DefaultTransport = previous }()
 	http.DefaultTransport = yooTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Host != "api.yookassa.ru" {
@@ -33,9 +35,14 @@ func TestNativeYooKassaAutomaticIssueAndModeSwitch(t *testing.T) {
 		case r.URL.Path == "/v3/me":
 			body = fmt.Sprintf(`{"account_id":%q,"test":%v}`, shop, test)
 		case r.Method == "POST" && r.URL.Path == "/v3/payments":
-			body = fmt.Sprintf(`{"id":"invoice-%s","test":%v,"confirmation":{"confirmation_url":"https://yoomoney.ru/pay"}}`, shop, test)
+			invoices++
+			body = fmt.Sprintf(`{"id":"invoice-%s-%d","test":%v,"confirmation":{"confirmation_url":"https://yoomoney.ru/pay"}}`, shop, invoices, test)
 		case strings.HasPrefix(r.URL.Path, "/v3/payments/invoice-"):
-			body = fmt.Sprintf(`{"id":"invoice-%s","status":"succeeded","paid":true,"test":%v,"amount":{"value":"199.00","currency":"RUB"}}`, shop, test)
+			status := "pending"
+			if providerPaid {
+				status = "succeeded"
+			}
+			body = fmt.Sprintf(`{"id":%q,"status":%q,"paid":%v,"test":%v,"amount":{"value":"199.00","currency":"RUB"}}`, strings.TrimPrefix(r.URL.Path, "/v3/payments/"), status, providerPaid, test)
 		default:
 			t.Fatalf("unexpected provider request %s", r.URL.Path)
 		}
@@ -68,5 +75,35 @@ func TestNativeYooKassaAutomaticIssueAndModeSwitch(t *testing.T) {
 	must(t, err)
 	if totals.Purchases != 1 || totals.RublesKopecks != 19900 || totals.Days != 30 {
 		t.Fatal("test payments included in real purchase totals", totals)
+	}
+	// Closing an already confirmed invoice must neither expire it nor issue twice.
+	must(t, e.s.ClosePayment(ctx, liveInvoice.ID))
+	completed, err := e.st.Q.GetPayment(ctx, liveInvoice.ID)
+	must(t, err)
+	if completed.Status != "applied" || e.tg.told() != 2 {
+		t.Fatal("closing a paid order changed the receipt or issued twice")
+	}
+	providerPaid = false
+	order := e.invoice(666, 0, "addon:yookassa")
+	must(t, e.s.ClosePayment(ctx, order.ID))
+	closed, err := e.st.Q.GetPayment(ctx, order.ID)
+	must(t, err)
+	if closed.Status != "expired" {
+		t.Fatal("unpaid order was not closed")
+	}
+	must(t, e.s.ReopenPayment(ctx, order.ID))
+	reopened, err := e.st.Q.GetPayment(ctx, order.ID)
+	must(t, err)
+	if reopened.Status != "pending" {
+		t.Fatal("unpaid order was not reopened")
+	}
+	must(t, e.s.ClosePayment(ctx, order.ID))
+	providerPaid = true
+	must(t, e.s.RefreshPayment(ctx, order.ID))
+	must(t, e.s.RefreshPayment(ctx, order.ID))
+	issued, err := e.st.Q.ListTgLinksOf(ctx, 666)
+	must(t, err)
+	if len(issued) != 1 || e.tg.told() != 3 {
+		t.Fatal("late provider-confirmed payment did not issue exactly once")
 	}
 }

@@ -7,7 +7,7 @@ import (
 
 func TestMenuStructureAndDeletion(t *testing.T) {
 	cfg := Default("ru")
-	if len(cfg.Buttons) != 3 || cfg.Buttons[0].Action != "profile" || cfg.Buttons[1].Action != "renew" || cfg.Buttons[2].Action != "buy" {
+	if len(cfg.Buttons) != 5 || cfg.Buttons[0].Action != "buy" || cfg.Buttons[1].Action != "renew" || cfg.Buttons[2].Action != "profile" || cfg.Buttons[3].Action != "help" {
 		t.Fatalf("default menu: %+v", cfg.Buttons)
 	}
 	if strings.Contains(cfg.Texts.Main, "{term}") || strings.Contains(cfg.Texts.Main, "{state}") {

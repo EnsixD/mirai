@@ -11,7 +11,7 @@ import (
 // notifications go out. It is stored as one JSON setting.
 type AdminMenuButton struct {
 	ID     string `json:"id"`
-	Action string `json:"action" enum:"users,subscriptions,search,grant"`
+	Action string `json:"action" enum:"users,subscriptions,search,grant,orders,broadcast,maintenance,refresh"`
 	Label  string `json:"label" maxLength:"40"`
 	On     bool   `json:"on"`
 	Row    bool   `json:"row"`
@@ -44,7 +44,7 @@ type Config struct {
 // a text of the admin's.
 type MenuButton struct {
 	ID     string `json:"id" doc:"Постоянный id кнопки"`
-	Action string `json:"action" enum:"profile,buy,sub,devices,connect,renew,support,app,url,page"`
+	Action string `json:"action" enum:"profile,buy,sub,devices,connect,renew,support,app,help,url,page"`
 	Label  string `json:"label"`
 	On     bool   `json:"on"`
 	Row    bool   `json:"row" doc:"В одном ряду с предыдущей"`
@@ -73,7 +73,7 @@ type Notify struct {
 }
 
 // Built-in actions, each at most once in the menu.
-var builtins = []string{"profile", "buy", "devices", "connect", "renew", "support", "app"}
+var builtins = []string{"help", "profile", "buy", "devices", "connect", "renew", "support", "app"}
 
 // Default is the menu of a fresh bot in lang, "en" or else Russian.
 func Default(lang string) Config {
@@ -88,13 +88,15 @@ func Default(lang string) Config {
 	}
 	return Config{
 		Lang:        lang,
-		MenuVersion: 3,
+		MenuVersion: 4,
 		Texts:       DefaultTexts(lang),
-		Admin:       AdminMenuConfig{Version: 2, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
+		Admin:       AdminMenuConfig{Version: 3, Buttons: defaultAdminButtons(), Enabled: true, Users: true, Subscriptions: true, Search: true, Grant: true, Statistics: true},
 		Buttons: []MenuButton{
-			{ID: "profile", Action: "profile", Label: l("👤 Профиль", "👤 Profile"), On: true},
-			{ID: "renew", Action: "renew", Label: l("💳 Продлить", "💳 Renew"), On: true},
 			{ID: "buy", Action: "buy", Label: l("🛒 Купить", "🛒 Buy"), On: true},
+			{ID: "renew", Action: "renew", Label: l("🔄 Продлить", "🔄 Renew"), On: true},
+			{ID: "profile", Action: "profile", Label: l("👤 Профиль", "👤 Profile"), On: true},
+			{ID: "help", Action: "help", Label: l("📖 Инструкция", "📖 Instructions"), On: true},
+			{ID: "support", Action: "support", Label: l("💬 Поддержка", "💬 Support"), On: true},
 		},
 		Notify:     Notify{Expire3d: true, Expire1d: true, Expired: true, Traffic90: true, Traffic100: true},
 		MiniApp:    true,
@@ -139,7 +141,12 @@ func (c *Config) Validate() error {
 			}
 		}
 		if !found {
-			buttons = append(buttons, Default(c.Lang).Buttons[2])
+			for _, button := range Default(c.Lang).Buttons {
+				if button.Action == "buy" {
+					buttons = append(buttons, button)
+					break
+				}
+			}
 		}
 		c.Buttons = buttons
 		c.MenuVersion = 2
@@ -184,9 +191,40 @@ func (c *Config) Validate() error {
 		}
 	}
 	c.Admin.Buttons = buttons
-	c.Admin.Version = 2
+	if c.Admin.Version < 3 {
+		for _, entry := range defaultAdminButtons() {
+			if entry.Action == "users" || entry.Action == "subscriptions" || entry.Action == "search" {
+				continue
+			}
+			found := false
+			for _, current := range c.Admin.Buttons {
+				if current.Action == entry.Action {
+					found = true
+				}
+			}
+			if !found {
+				c.Admin.Buttons = append(c.Admin.Buttons, entry)
+			}
+		}
+	}
+	c.Admin.Version = 3
+	if c.MenuVersion < 4 {
+		if len(c.Buttons) == 3 && c.Buttons[0].Action == "profile" && c.Buttons[1].Action == "renew" && c.Buttons[2].Action == "buy" {
+			c.Buttons[0], c.Buttons[2] = c.Buttons[2], c.Buttons[0]
+		}
+		found := false
+		for _, button := range c.Buttons {
+			if button.Action == "help" {
+				found = true
+			}
+		}
+		if !found {
+			c.Buttons = append(c.Buttons, MenuButton{ID: "help", Action: "help", Label: "📖 Инструкция", On: true})
+		}
+		c.MenuVersion = 4
+	}
 	seenAdmin := map[string]bool{}
-	if len(c.Admin.Buttons) > 4 {
+	if len(c.Admin.Buttons) > 10 {
 		return ErrButtons
 	}
 	c.Admin.Users = false
@@ -194,7 +232,7 @@ func (c *Config) Validate() error {
 	c.Admin.Search = false
 	for i := range c.Admin.Buttons {
 		button := &c.Admin.Buttons[i]
-		if !contains([]string{"users", "subscriptions", "search"}, button.Action) || seenAdmin[button.Action] {
+		if !contains([]string{"users", "subscriptions", "search", "orders", "broadcast", "maintenance", "refresh"}, button.Action) || seenAdmin[button.Action] {
 			return ErrButtons
 		}
 		seenAdmin[button.Action] = true
@@ -351,6 +389,9 @@ func (c *Config) Validate() error {
 				return ErrButtonText
 			}
 		default:
+			if b.Action == "help" && utf8.RuneCountInString(b.Text) > maxText {
+				return ErrButtonText
+			}
 			if !contains(builtins, b.Action) || seen[b.Action] {
 				return ErrButtons
 			}
@@ -418,5 +459,5 @@ func itoa(n int) string {
 }
 
 func defaultAdminButtons() []AdminMenuButton {
-	return []AdminMenuButton{{ID: "users", Action: "users", Label: "👥 Пользователи", On: true}, {ID: "subscriptions", Action: "subscriptions", Label: "📋 Все подписки", On: true}, {ID: "search", Action: "search", Label: "🔎 Поиск", On: true}}
+	return []AdminMenuButton{{ID: "users", Action: "users", Label: "👥 Пользователи", On: true}, {ID: "subscriptions", Action: "subscriptions", Label: "🔑 Ключи", On: true}, {ID: "orders", Action: "orders", Label: "🧾 Заказы", On: true}, {ID: "broadcast", Action: "broadcast", Label: "📢 Рассылка", On: true}, {ID: "maintenance", Action: "maintenance", Label: "🛠 Тех. работы", On: true}, {ID: "refresh", Action: "refresh", Label: "🔄 Обновить", On: true}}
 }

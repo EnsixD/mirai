@@ -494,7 +494,9 @@ func (b *Bot) handle(ctx context.Context, c *Client, up Update) error {
 	switch {
 	case up.PreCheckoutQuery != nil:
 		// Ten seconds from Telegram, whatever else the loop waits for: its own goroutine.
-		b.running.Go(func() { _ = c.AnswerPreCheckout(ctx, up.PreCheckoutQuery.ID, false, "Telegram Stars are not supported") })
+		b.running.Go(func() {
+			_ = c.AnswerPreCheckout(ctx, up.PreCheckoutQuery.ID, false, "Telegram Stars are not supported")
+		})
 	case up.Message != nil && up.Message.SuccessfulPayment != nil && up.Message.Chat.Type == "private":
 		return nil
 	case up.CallbackQuery != nil && up.CallbackQuery.Message != nil && up.CallbackQuery.Message.Chat.Type == "private":
@@ -521,6 +523,10 @@ func (b *Bot) onMessage(ctx context.Context, out *Outbox, m *Message) {
 	_ = b.d.Store.Q.UpsertTgChat(ctx, db.UpsertTgChatParams{TgID: chat, Username: m.From.Username, FirstName: m.From.FirstName, CreatedAt: now, UpdatedAt: now})
 	messageText := strings.TrimSpace(m.Text)
 	if b.adminMessage(ctx, out, m) {
+		return
+	}
+	if b.botGate(ctx, chat) != "" {
+		b.freshMenu(out, chat, "")
 		return
 	}
 	if strings.HasPrefix(messageText, "/start infra_") {
@@ -755,6 +761,12 @@ func (b *Bot) onTransfer(ctx context.Context, c *Client, out *Outbox, q *Callbac
 		return
 	}
 	b.answer(ctx, c, q.ID)
+	if message := b.botGate(ctx, chat); message != "" {
+		out.Reply(chat, "transfer-gate", 1, func(ctx context.Context, c *Client) error {
+			return c.Edit(ctx, chat, msg, message, nil)
+		})
+		return
+	}
 	cmd, arg, _ := strings.Cut(q.Data, ":")
 	uidStr, toStr, _ := strings.Cut(arg, ":")
 	userID, _ := strconv.ParseInt(uidStr, 10, 64)

@@ -346,3 +346,63 @@ func (s *Service) checkAddon(ctx context.Context, provider, ext string) error {
 	}
 	return nil
 }
+
+// RefreshPayment verifies the invoice with its provider before applying anything.
+func (s *Service) RefreshPayment(ctx context.Context, id int64) error {
+	p, err := s.d.Store.Q.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.ExternalID.Valid && AddonID(p.Provider) != "" {
+		if err := s.checkAddon(ctx, p.Provider, p.ExternalID.String); err != nil {
+			return err
+		}
+	}
+	p, err = s.d.Store.Q.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.Status == "paid" {
+		return s.Apply(ctx, id)
+	}
+	return nil
+}
+
+// ClosePayment expires the local order; a late real payment is still reconciled safely.
+func (s *Service) ClosePayment(ctx context.Context, id int64) error {
+	if err := s.RefreshPayment(ctx, id); err != nil {
+		return err
+	}
+	changed, err := s.d.Store.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{ID: id, OldStatus: "pending", NewStatus: "expired"})
+	if err != nil {
+		return err
+	}
+	if changed > 0 && s.d.Promo != nil {
+		return s.d.Promo.ReleasePayment(ctx, id)
+	}
+	return nil
+}
+
+func (s *Service) ReopenPayment(ctx context.Context, id int64) error {
+	if err := s.RefreshPayment(ctx, id); err != nil {
+		return err
+	}
+	p, err := s.d.Store.Q.GetPayment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.Status != "expired" {
+		return nil
+	}
+	if s.d.Promo != nil {
+		_, err := s.d.Promo.GetPaymentRedemption(ctx, id)
+		if err == nil {
+			return errors.New("create a new order to refresh its promotional price")
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	_, err = s.d.Store.Q.SetPaymentStatus(ctx, db.SetPaymentStatusParams{ID: id, OldStatus: "expired", NewStatus: "pending"})
+	return err
+}
