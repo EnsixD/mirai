@@ -268,7 +268,12 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 		if cfg.Admin.Grant {
 			rows = append(rows, []Button{adminButton("🎁 Выдать", fmt.Sprintf("grant:%d", id))})
 		}
-		rows = append(rows, []Button{adminButton(fmt.Sprintf("🔑 Ключи (%d)", len(subscriptions)), fmt.Sprintf("owned:%d", id))})
+		subscriptionButton := adminButton(fmt.Sprintf("🔑 Все подписки (%d)", len(subscriptions)), fmt.Sprintf("owned:%d", id))
+		if len(rows) > 0 {
+			rows[0] = append(rows[0], subscriptionButton)
+		} else {
+			rows = append(rows, []Button{subscriptionButton})
+		}
 		account, _ := q.GetTgChat(ctx, id)
 		text += "\n\nПришёл: " + time.Unix(account.CreatedAt, 0).UTC().Format("02.01.2006")
 		used, _ := q.AccountTrialUsed(ctx, id)
@@ -285,7 +290,7 @@ func (b *Bot) renderAdmin(ctx context.Context, chat int64, data string) (string,
 			text += "\n\n🚫 <b>Заблокирован</b>"
 		}
 		rows = append(rows, []Button{adminButton(banLabel, fmt.Sprintf("ban:%d", id)), adminButton("🗑 Удалить", fmt.Sprintf("account-delete:%d", id))})
-		return text, adminKB(append(rows, []Button{adminButton("← Пользователи", "users:0"), adminButton("⚙️ Админка", "home")})...)
+		return text, adminKB(append(rows, []Button{adminButton("Назад", "users:0"), adminButton("⚙️ Админка", "home")})...)
 	case "owned":
 		subscriptions, err := q.ListTgLinksOf(ctx, id)
 		if err != nil {

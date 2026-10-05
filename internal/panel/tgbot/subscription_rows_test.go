@@ -29,6 +29,11 @@ func TestSubscriptionNavigationRows(t *testing.T) {
 		}
 		return v.Rows
 	}
+	_, profile := e.bot.renderAdmin(e.ctx, 900, "contact:555")
+	profileRows := rows(profile)
+	if len(profileRows) != 3 || len(profileRows[0]) != 2 || len(profileRows[1]) != 2 || len(profileRows[2]) != 2 {
+		t.Fatal("admin profile must be 2-2-2", profileRows)
+	}
 	_, home := e.bot.renderAdmin(e.ctx, 900, "home")
 	homeRows := rows(home)
 	if len(homeRows) != 4 || len(homeRows[0]) != 2 || len(homeRows[1]) != 2 || len(homeRows[2]) != 2 || len(homeRows[3]) != 1 || homeRows[3][0].CallbackData != "m" {
