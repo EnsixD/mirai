@@ -1350,7 +1350,7 @@ export interface components {
         };
         AdminMenuButton: {
             /** @enum {string} */
-            action: "users" | "subscriptions" | "search" | "grant";
+            action: "users" | "subscriptions" | "search" | "grant" | "orders" | "broadcast" | "maintenance" | "refresh";
             id: string;
             label: string;
             on: boolean;
@@ -1901,7 +1901,7 @@ export interface components {
         };
         MenuButton: {
             /** @enum {string} */
-            action: "profile" | "buy" | "sub" | "devices" | "connect" | "renew" | "support" | "app" | "url" | "page";
+            action: "profile" | "buy" | "sub" | "devices" | "connect" | "renew" | "support" | "app" | "help" | "url" | "page";
             /** @description Постоянный id кнопки */
             id: string;
             label: string;
@@ -2202,6 +2202,7 @@ export interface components {
             device_reset?: components["schemas"]["DeviceResetPolicy"];
             enabled?: boolean;
             infrastructure?: components["schemas"]["AlertsConfigPatch"];
+            maintenance?: boolean;
             /** @description Перед сохранением панель проверяет, что Telegram отвечает этим путём */
             route?: components["schemas"]["RouteStruct"];
             /** @description Токен от @BotFather; пустая строка — удалить */
@@ -2787,7 +2788,7 @@ export interface components {
         TelegramView: {
             /**
              * Format: int64
-             * @description Аккаунтов Telegram с подписками
+             * @description Аккаунтов, открывших Telegram-бота
              */
             accounts: number;
             admin_chat_set: boolean;
@@ -2812,6 +2813,8 @@ export interface components {
              * @description Подписок, привязанных к Telegram
              */
             linked: number;
+            /** @description Технические работы: пользовательское меню временно недоступно */
+            maintenance: boolean;
             /** @description Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный */
             mini_app_url: string;
             /** @description Как бот ходит в Telegram */

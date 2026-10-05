@@ -267,7 +267,11 @@
               "users",
               "subscriptions",
               "search",
-              "grant"
+              "grant",
+              "orders",
+              "broadcast",
+              "maintenance",
+              "refresh"
             ],
             "type": "string"
           },
@@ -1844,6 +1848,7 @@
               "renew",
               "support",
               "app",
+              "help",
               "url",
               "page"
             ],
@@ -2652,6 +2657,9 @@
           },
           "infrastructure": {
             "$ref": "#/components/schemas/AlertsConfigPatch"
+          },
+          "maintenance": {
+            "type": "boolean"
           },
           "route": {
             "$ref": "#/components/schemas/RouteStruct",
@@ -4244,7 +4252,7 @@
         "additionalProperties": false,
         "properties": {
           "accounts": {
-            "description": "Аккаунтов Telegram с подписками",
+            "description": "Аккаунтов, открывших Telegram-бота",
             "format": "int64",
             "type": "integer"
           },
@@ -4288,6 +4296,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "maintenance": {
+            "description": "Технические работы: пользовательское меню временно недоступно",
+            "type": "boolean"
+          },
           "mini_app_url": {
             "description": "Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный",
             "type": "string"
@@ -4309,6 +4321,7 @@
           }
         },
         "required": [
+          "maintenance",
           "device_reset",
           "enabled",
           "token_set",

@@ -23,6 +23,7 @@ import (
 // TelegramView is the bot as the admin panel shows it. The token itself never leaves
 // the panel.
 type TelegramView struct {
+	Maintenance    bool                     `json:"maintenance" doc:"Технические работы: пользовательское меню временно недоступно"`
 	DeviceReset    domain.DeviceResetPolicy `json:"device_reset"`
 	Enabled        bool                     `json:"enabled"`
 	TokenSet       bool                     `json:"token_set" doc:"Токен сохранён"`
@@ -34,7 +35,7 @@ type TelegramView struct {
 	Defaults       tgbot.Texts              `json:"defaults" doc:"Встроенные тексты на языке бота: пустое поле берёт их"`
 	MiniAppURL     string                   `json:"mini_app_url" doc:"Адрес Mini App; пусто — Telegram его не откроет: нет адреса или сертификат самоподписанный"`
 	Linked         int64                    `json:"linked" doc:"Подписок, привязанных к Telegram"`
-	Accounts       int64                    `json:"accounts" doc:"Аккаунтов Telegram с подписками"`
+	Accounts       int64                    `json:"accounts" doc:"Аккаунтов, открывших Telegram-бота"`
 	Broadcast      *TelegramBroadcast       `json:"broadcast,omitempty" doc:"Последняя рассылка с запуска панели"`
 	Route          TelegramRoute            `json:"route" doc:"Как бот ходит в Telegram"`
 	Infrastructure infraalerts.AlertsConfig `json:"infrastructure"`
@@ -66,6 +67,7 @@ type telegramOutput struct{ Body TelegramView }
 
 type patchTelegramInput struct {
 	Body struct {
+		Maintenance    *bool                          `json:"maintenance,omitempty"`
 		DeviceReset    *domain.DeviceResetPolicy      `json:"device_reset,omitempty"`
 		Enabled        *bool                          `json:"enabled,omitempty"`
 		AdminID        *int64                         `json:"admin_id,omitempty" minimum:"0" maximum:"9007199254740991"`
@@ -139,6 +141,10 @@ func (h *handlers) registerTelegram() {
 func (h *handlers) telegramView(ctx context.Context) (TelegramView, error) {
 	var v TelegramView
 	var err error
+	v.Maintenance, _, err = settings.Get[bool](ctx, h.d.Settings, tgbot.KeyMaintenance)
+	if err != nil {
+		return v, err
+	}
 	if v.Enabled, err = h.d.Settings.On(ctx, tgbot.Enabled); err != nil {
 		return v, err
 	}
@@ -301,6 +307,12 @@ func (h *handlers) updateTelegram(ctx context.Context, in *patchTelegramInput) (
 	// other's fields (a serialization conflict merges again).
 	err = h.d.Store.Tx(ctx, func(q *db.Queries) error {
 		set := settings.New(q)
+		if b.Maintenance != nil {
+			if err := settings.Set(ctx, set, tgbot.KeyMaintenance, *b.Maintenance); err != nil {
+				return err
+			}
+			details["maintenance"] = *b.Maintenance
+		}
 		if b.DeviceReset != nil {
 			if err := settings.Set(ctx, set, domain.DeviceResetKey, *b.DeviceReset); err != nil {
 				return err

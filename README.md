@@ -27,7 +27,7 @@ Mirai brings VPN infrastructure and subscription management into one interface, 
 | Route | Happ and INCY deeplink profiles, plus Clash routing rules |
 | Customize | Mirai and Midnight themes, animated modals, draggable bot buttons |
 
-Fresh installations start with **no tariffs and no published inbounds**. Add only what you intend to use.
+Fresh installations start with **no customers, subscriptions, tariffs, payment credentials or published inbounds**. Default Telegram copy is included; all credentials and service settings belong to the installation owner.
 
 ## Screenshots
 
@@ -90,17 +90,22 @@ The bot runs inside the panel. Add a BotFather token and your numeric administra
 
 ```text
 /start → VPN description
-         👤 Profile · 💳 Renew · 🛒 Buy
+         🛒 Buy · 🔄 Renew
+         👤 Profile · 📖 Instructions
          ⚙️ Admin panel — administrator only
 
-Profile → purchase statistics → 📋 My subscriptions
+Profile → purchase statistics → 📋 My subscriptions · 🧾 My orders
+Renew → choose a subscription → choose a term → payment
+My orders → resume payment · verify status · close order
 My subscriptions → choose a subscription → details → 📱 Devices (count)
 Devices → tap a device to clear it, or 🧹 Clear all
 ```
 
 Visitors who send `/start` or interact with the bot appear in the panel with their Telegram identity. Telegram does not notify bots when someone merely opens an idle chat.
 
-Customer and admin buttons support drag ordering, deletion and placement on the same row as the previous button. Texts, notifications, device reset quotas and admin actions are configured in the panel. The selected trial plan appears under **Buy**, can be claimed once per Telegram account, and disappears after use.
+Customer and admin buttons support drag ordering and deletion, with a consistent compact two-column layout. Texts, notifications, device reset quotas and admin actions are configured in the panel. The selected trial plan appears under **Buy**, can be claimed once per Telegram account, and disappears after use.
+
+The private admin menu includes users, keys, pending orders, broadcasts, maintenance and refresh. Customer cards offer issuing a key, their keys, blocking and deletion; subscription cards expose the connection link, expiry, device cap and connected devices. Destructive actions and broadcasts require confirmation. Maintenance can also be controlled from the panel; it pauses the customer bot menu while subscription access and payment reconciliation continue.
 
 ## Connections and routing
 
