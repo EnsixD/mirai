@@ -455,6 +455,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{id}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Статус обновления ноды */
+        get: operations["node-update-status"];
+        put?: never;
+        /** Обновить ноду */
+        post: operations["request-node-update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/{id}/warp": {
         parameters: {
             query?: never;
@@ -2941,6 +2959,13 @@ export interface components {
             /** Format: int64 */
             up: number;
         };
+        UpdateStatus: {
+            error?: string;
+            requested: boolean;
+            state: string;
+            supported: boolean;
+            version: string;
+        };
         UpdatesView: {
             /** @description Сервер сам ставит новые релизы раз в сутки, ночью */
             auto: boolean;
@@ -4140,6 +4165,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NodeKeyOutputBody"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "node-update-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateStatus"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "request-node-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

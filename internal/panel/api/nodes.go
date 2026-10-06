@@ -82,6 +82,7 @@ type nodeIDInput struct {
 }
 
 func (h *handlers) registerNodes() {
+	h.registerNodeUpdates()
 	huma.Register(h.api, huma.Operation{OperationID: "list-nodes", Method: http.MethodGet, Path: "/api/v1/nodes", Summary: "Ноды", Tags: []string{"node"}}, h.listNodes)
 	huma.Register(h.api, huma.Operation{OperationID: "create-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPost, Path: "/api/v1/nodes", Summary: "Добавить ноду", Tags: []string{"node"}, DefaultStatus: http.StatusCreated}, h.createNode)
 	huma.Register(h.api, huma.Operation{OperationID: "update-node", Metadata: sessionOnly, Extensions: sessionOnlyExt, Method: http.MethodPatch, Path: "/api/v1/nodes/{id}", Summary: "Изменить ноду", Tags: []string{"node"}}, h.updateNode)

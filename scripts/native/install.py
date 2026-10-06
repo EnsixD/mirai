@@ -157,7 +157,7 @@ def main():
                 raise SystemExit('Updater checksum mismatch')
             (Path('/opt/mirai') / name).write_bytes(data)
             (Path('/opt/mirai') / name).chmod(0o755)
-    env = {'MIRAI_DATA_DIR': '/var/lib/mirai', 'MIRAI_NODE_SOCKET': '/run/mirai/node.sock'}
+    env = {'MIRAI_NATIVE_UPDATE': '1', 'MIRAI_DATA_DIR': '/var/lib/mirai', 'MIRAI_NODE_SOCKET': '/run/mirai/node.sock'}
     if args.join:
         env['MIRAI_NODE_JOIN'] = args.join
         env['MIRAI_NODE_API_LISTEN'] = '0.0.0.0'
@@ -239,14 +239,14 @@ case "$1" in
  *) exec /opt/mirai/mirai "$@" ;;
 esac
 ''', 0o755)
+    write('/etc/systemd/system/mirai-update.service', '[Unit]\nDescription=Verified Mirai update\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/mirai/update.py --requested\n')
+    write('/etc/systemd/system/mirai-update.path', '[Unit]\nDescription=Mirai update requests\n[Path]\nPathExists=/var/lib/mirai/update/request\n[Install]\nWantedBy=multi-user.target\n')
     if not args.join:
-        write('/etc/systemd/system/mirai-update.service', '[Unit]\nDescription=Verified Mirai update\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/mirai/update.py --requested\n')
-        write('/etc/systemd/system/mirai-update.path', '[Unit]\nDescription=Mirai update requests\n[Path]\nPathExists=/var/lib/mirai/update/request\n[Install]\nWantedBy=multi-user.target\n')
         write('/etc/systemd/system/mirai-update-auto.service', '[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/mirai/update.py --auto\n')
         write('/etc/systemd/system/mirai-update.timer', '[Timer]\nOnCalendar=daily\nRandomizedDelaySec=1h\nUnit=mirai-update-auto.service\n[Install]\nWantedBy=timers.target\n')
     run('systemctl', 'daemon-reload')
     run('python3', '/opt/mirai/firewall.py', '--install-service')
-    run('systemctl', 'enable', '--now', 'mirai-node')
+    run('systemctl', 'enable', '--now', 'mirai-node', 'mirai-update.path')
     if not args.join:
         run('systemctl', 'enable', '--now', 'mirai', 'mirai-update.path', 'mirai-update.timer')
         for _ in range(30):

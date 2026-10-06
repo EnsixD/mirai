@@ -17,8 +17,8 @@ manifest = {
     'native': {},
     'files': {name: hashlib.sha256(Path('dist', name).read_bytes()).hexdigest() for name in ['install.py', 'update.py', 'firewall.py']},
     'notes': {
-        'ru': 'Встроенная ЮKassa без маркетплейса и контейнеров: отдельные тестовый и боевой магазины, переключение режима и автоматическая выдача подписок. Тестовые оплаты не входят в реальные финансовые итоги. Изменённые лимиты тарифа автоматически применяются к его подписчикам без сброса оплаченного срока и трафика; удалённый тариф не отображается у пользователя.',
-        'en': 'Built-in YooKassa without marketplace containers: separate test and live shops, mode switching and automatic subscription issuance. Test payments are excluded from real purchase totals. Updated tariff limits propagate to subscribers while preserving paid time and used traffic; deleted tariffs are removed from customer displays.',
+        'ru': 'Компактная структура Telegram-бота с баннером, списками устройств и тарифов. Перетаскивание тарифов с сохранением порядка продажи. Исправлены даты перенесённых устройств и страницы подписок. Удалённое обновление нод по кнопке через подписанный нативный установщик.',
+        'en': 'Compact Telegram navigation with banners and device and tariff lists. Drag tariffs to persist the sale order. Fixed imported device timestamps and subscription pages. Remote node updates through the signed native updater.',
     },
 }
 for arch in ['x86_64', 'aarch64']:

@@ -892,3 +892,28 @@ func poolKey(ps []nodeapi.PoolQuota) []string {
 	}
 	return out
 }
+
+func (m *Manager) UpdateStatus(ctx context.Context, id int64) (nodeapi.UpdateStatus, error) {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.UpdateStatus{}, nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(interface {
+		UpdateStatus(context.Context) (nodeapi.UpdateStatus, error)
+	})
+	if !ok {
+		return nodeapi.UpdateStatus{}, nodeapi.ErrUnavailable
+	}
+	return c.UpdateStatus(ctx)
+}
+func (m *Manager) RequestUpdate(ctx context.Context, id int64) error {
+	s, ok := m.Syncer(id)
+	if !ok {
+		return nodeapi.ErrUnavailable
+	}
+	c, ok := s.node.(interface{ RequestUpdate(context.Context) error })
+	if !ok {
+		return nodeapi.ErrUnavailable
+	}
+	return c.RequestUpdate(ctx)
+}

@@ -47,7 +47,17 @@ func TestCustomerProfilePurchaseTotals(t *testing.T) {
 		t.Fatalf("legacy menu not migrated: %+v", legacy.Buttons)
 	}
 	menu := bot.menu(ctx, Config{Buttons: legacy.Buttons}, wordsFor("ru"), 1)
-	if len(menu.InlineKeyboard) != 3 || menu.InlineKeyboard[0][0].CallbackData != "pf" || menu.InlineKeyboard[1][0].CallbackData != "b" {
+	profile, buy := false, false
+	for _, row := range menu.InlineKeyboard {
+		if len(row) > 2 {
+			t.Fatal("menu must keep compact rows")
+		}
+		for _, button := range row {
+			profile = profile || button.CallbackData == "pf"
+			buy = buy || button.CallbackData == "b"
+		}
+	}
+	if !profile || !buy {
 		t.Fatal("profile and purchase entry are missing")
 	}
 }

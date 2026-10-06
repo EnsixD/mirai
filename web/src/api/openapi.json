@@ -4583,6 +4583,33 @@
         ],
         "type": "object"
       },
+      "UpdateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "version",
+          "requested",
+          "supported"
+        ],
+        "type": "object"
+      },
       "UpdatesView": {
         "additionalProperties": false,
         "properties": {
@@ -6454,6 +6481,84 @@
           }
         },
         "summary": "Выпустить новый ключ ноды (старый перестаёт работать)",
+        "tags": [
+          "node"
+        ],
+        "x-session-only": true
+      }
+    },
+    "/api/v1/nodes/{id}/update": {
+      "get": {
+        "operationId": "node-update-status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Статус обновления ноды",
+        "tags": [
+          "node"
+        ]
+      },
+      "post": {
+        "operationId": "request-node-update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Обновить ноду",
         "tags": [
           "node"
         ],

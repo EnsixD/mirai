@@ -71,6 +71,7 @@ jobs:
           go test ./internal/panel/tgbot -run '^TestKeyboardWireGridPreservesActions$'
           go test ./internal/panel/tgbot -run '^Test(LocalBotStructureAndOwnership|AdminAccountBanAndDeletion|AdminDeviceNavigationAndRevokedPermission|AdminAccess|AdminSubscriptionLifecycle|DeviceLabelIncludesModelOSAndApp|SubscriptionNavigationRows|BannerScreensAndInstructionRows|AdministratorChangeNotice)$'
           go test ./internal/panel/app -run '^TestSubscriptionHTTPWithoutCertificate$'
+          go test ./internal/node -run '^TestNativeUpdateRequestAndStatus$'
           go test ./internal/proto -run '^TestMiraiTransportSafety$'
           go test ./internal/panel/subs -run '^TestXHTTPUDPFailClosed$'
           go test ./internal/panel/autotune -run '^TestCutOff$'

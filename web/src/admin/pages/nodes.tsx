@@ -1,5 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, Cloud, Copy, KeyRound, Pencil, Plus, ShieldCheck, Trash2, Waypoints } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorText, unwrap, type Schemas } from "../../api/client";
 import { qk, useNodes } from "../../api/hooks";
@@ -169,6 +169,19 @@ function NodeCard({
   onRemove: () => void;
 }) {
   const mem = n.mem_total ? Math.round((n.mem_used / n.mem_total) * 100) : 0;
+  const qc = useQueryClient();
+  const toast = useToast();
+  const updateState = useQuery({
+    queryKey: ["nodeUpdate", n.id],
+    queryFn: () => unwrap(api.GET("/api/v1/nodes/{id}/update", { params: { path: { id: n.id } } })),
+    enabled: n.status === "ok", refetchInterval: 5000, retry: false,
+  });
+  const update = useMutation({
+    mutationFn: () => unwrap(api.POST("/api/v1/nodes/{id}/update", { params: { path: { id: n.id } } })),
+    onSuccess: () => { toast.ok(t("nodes.updateRequested")); void qc.invalidateQueries({queryKey:["nodeUpdate",n.id]}); },
+    onError: (e) => toast.error(errorText(e)),
+  });
+  const updating = update.isPending || updateState.data?.requested || updateState.data?.state === "running";
   return (
     <section className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
       <div className="flex items-start justify-between gap-3">
@@ -243,7 +256,11 @@ function NodeCard({
           </div>
         ) : null}
       </dl>
+      {updateState.data?.error ? <p className="mt-3 text-xs text-[var(--berry-600)]">{updateState.data.error}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
+        <Button size="sm" disabled={n.status !== "ok" || !updateState.data?.supported || !!updating} onClick={() => update.mutate()}>
+          <RefreshCw size={16} aria-hidden className={updating ? "animate-spin" : undefined} /> {t(updating ? "nodes.updating" : "nodes.updateNow")}
+        </Button>
         <Button size="sm" onClick={onEdit}>
           <Pencil size={16} aria-hidden /> {t("nodes.configure")}
         </Button>

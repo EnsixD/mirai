@@ -1218,6 +1218,10 @@
     "promoNoExpiry": "The subscription has no end date"
   },
   "nodes": {
+    "updateNow": "Update",
+    "updating": "Updating…",
+    "updateRequested": "Update requested. The node will reconnect briefly.",
+
     "subtitle": "Servers that run the VPN. The subscription includes the protocols of every enabled node, each in its own group.",
     "add": "Add node",
     "addSubmit": "Add and get the key",
