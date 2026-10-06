@@ -2068,6 +2068,40 @@
         ],
         "type": "object"
       },
+      "NodeUpdateView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "latest_version": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "state",
+          "version",
+          "requested",
+          "supported"
+        ],
+        "type": "object"
+      },
       "NodeView": {
         "additionalProperties": false,
         "properties": {
@@ -4583,33 +4617,6 @@
         ],
         "type": "object"
       },
-      "UpdateStatus": {
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "requested": {
-            "type": "boolean"
-          },
-          "state": {
-            "type": "string"
-          },
-          "supported": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "state",
-          "version",
-          "requested",
-          "supported"
-        ],
-        "type": "object"
-      },
       "UpdatesView": {
         "additionalProperties": false,
         "properties": {
@@ -6507,7 +6514,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateStatus"
+                  "$ref": "#/components/schemas/NodeUpdateView"
                 }
               }
             },

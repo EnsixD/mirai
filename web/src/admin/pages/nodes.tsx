@@ -258,9 +258,9 @@ function NodeCard({
       </dl>
       {updateState.data?.error ? <p className="mt-3 text-xs text-[var(--berry-600)]">{updateState.data.error}</p> : null}
       <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--hairline)] pt-4">
-        <Button size="sm" disabled={n.status !== "ok" || !updateState.data?.supported || !!updating} onClick={() => update.mutate()}>
+        {updateState.data?.available ? <Button size="sm" disabled={n.status !== "ok" || !!updating} onClick={() => update.mutate()}>
           <RefreshCw size={16} aria-hidden className={updating ? "animate-spin" : undefined} /> {t(updating ? "nodes.updating" : "nodes.updateNow")}
-        </Button>
+        </Button> : null}
         <Button size="sm" onClick={onEdit}>
           <Pencil size={16} aria-hidden /> {t("nodes.configure")}
         </Button>

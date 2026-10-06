@@ -2026,6 +2026,15 @@ export interface components {
             key: string;
             node: components["schemas"]["NodeInfo"];
         };
+        NodeUpdateView: {
+            available: boolean;
+            error?: string;
+            latest_version?: string;
+            requested: boolean;
+            state: string;
+            supported: boolean;
+            version: string;
+        };
         NodeView: {
             /** Format: date-time */
             checked_at: string;
@@ -2958,13 +2967,6 @@ export interface components {
             t: string;
             /** Format: int64 */
             up: number;
-        };
-        UpdateStatus: {
-            error?: string;
-            requested: boolean;
-            state: string;
-            supported: boolean;
-            version: string;
         };
         UpdatesView: {
             /** @description Сервер сам ставит новые релизы раз в сутки, ночью */
@@ -4194,7 +4196,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UpdateStatus"];
+                    "application/json": components["schemas"]["NodeUpdateView"];
                 };
             };
             /** @description Error */
