@@ -5,7 +5,7 @@ import { useUserConnections } from "../../../api/hooks";
 import { Drawer } from "../../../components/overlay";
 import { Avatar, ErrorState, Skeleton } from "../../../components/ui";
 import { t } from "../../../i18n";
-import { classify, splitDest, type ServiceKind, type Target } from "../../../lib/apps";
+import { classify, parseWatch, splitDest, type Flag, type ServiceKind, type Target } from "../../../lib/apps";
 import { bytes, dateShort, time } from "../../../lib/format";
 
 type Conn = Schemas["ConnectionView"];
@@ -38,6 +38,36 @@ const SERVICE_NAMES = {
   ads: "userDrawer.connSvcAds",
 } as const satisfies Record<ServiceKind, string>;
 
+const FLAG_NAMES = {
+  adult: "userDrawer.connFlagAdult",
+  tor: "userDrawer.connFlagTor",
+  watch: "userDrawer.connFlagWatch",
+} as const satisfies Record<Flag, string>;
+
+function FlagBadge({ flag }: { flag?: Flag }) {
+  if (!flag) return null;
+  return <span className="ml-2 rounded-[6px] bg-[var(--bad)] px-1.5 py-0.5 text-[11px] font-medium text-white">{t(FLAG_NAMES[flag])}</span>;
+}
+
+// The admin's own list lives in this browser: it is a way to look, not a setting of the panel.
+const WATCH_KEY = "mirai.connWatch";
+
+function loadWatch(): string {
+  try {
+    return localStorage.getItem(WATCH_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function saveWatch(text: string) {
+  try {
+    localStorage.setItem(WATCH_KEY, text);
+  } catch {
+    // A browser without storage keeps the list until the page is closed.
+  }
+}
+
 function targetName(x: Target): string {
   if (x.service) return t(SERVICE_NAMES[x.service]);
   return x.kind === "ip" ? t("userDrawer.connUnnamed") : x.name;
@@ -54,14 +84,14 @@ function seedOf(s: string): number {
   return n;
 }
 
-function toLines(conns: Conn[]): Line[] {
+function toLines(conns: Conn[], watch: readonly string[]): Line[] {
   const seen = new Map<string, number>();
   return conns.map((c) => {
     const { host: addr, port } = splitDest(c.dest);
     const base = `${c.node_id}|${c.network}|${c.ip}|${c.dest}|${c.started_at}`;
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
-    return { id: `${base}|${n}`, c, host: c.host || addr, addr, port, target: classify(c.host || addr, addr, port) };
+    return { id: `${base}|${n}`, c, host: c.host || addr, addr, port, target: classify(c.host || addr, addr, port, watch) };
   });
 }
 
@@ -84,8 +114,9 @@ function toGroups(lines: Line[]): Group[] {
     h.bytes += l.c.up + l.c.down;
     g.hosts.set(l.host, h);
   }
-  // By volume: the order holds still while the log refreshes, unlike "the latest first".
-  return [...groups.values()].sort((a, b) => b.up + b.down - (a.up + a.down) || a.target.key.localeCompare(b.target.key));
+  // Flagged first, then by volume: the order holds still while the log refreshes, unlike
+  // "the latest first".
+  return [...groups.values()].sort((a, b) => Number(!!b.target.flag) - Number(!!a.target.flag) || b.up + b.down - (a.up + a.down) || a.target.key.localeCompare(b.target.key));
 }
 
 /** The user's connection log: which apps and sites the traffic goes to. */
@@ -94,18 +125,23 @@ export function ConnectionsDialog({ u, open, onOpenChange }: { u: User; open: bo
   const [view, setView] = useState<"apps" | "all">("apps");
   const [filter, setFilter] = useState("");
   const [service, setService] = useState(false);
+  const [flagged, setFlagged] = useState(false);
+  const [watchText, setWatchText] = useState(loadWatch);
+  const watch = useMemo(() => parseWatch(watchText), [watchText]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   const conns = log.data?.conns;
-  const all = useMemo(() => toLines(conns ?? []), [conns]);
+  const all = useMemo(() => toLines(conns ?? [], watch), [conns, watch]);
+  const flaggedCount = useMemo(() => all.filter((l) => l.target.flag).length, [all]);
   const serviceCount = useMemo(() => all.filter((l) => l.target.kind === "service").length, [all]);
   const list = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return all.filter((l) => {
+      if (flagged && !l.target.flag) return false;
       if (!service && l.target.kind === "service") return false;
       return !q || [l.host, l.c.dest, l.c.ip, l.c.inbound, l.c.node, targetName(l.target)].some((v) => v.toLowerCase().includes(q));
     });
-  }, [all, filter, service]);
+  }, [all, filter, service, flagged]);
   const groups = useMemo(() => toGroups(list), [list]);
   const live = all.filter((l) => !l.c.ended_at).length;
   const down = log.data?.unavailable ?? [];
@@ -132,7 +168,27 @@ export function ConnectionsDialog({ u, open, onOpenChange }: { u: User; open: bo
             <input type="checkbox" checked={service} onChange={(e) => setService(e.target.checked)} />
             {t("userDrawer.connService", { n: serviceCount })}
           </label>
+          <label className="flex items-center gap-2 text-[13px] text-[var(--ink-600)]">
+            <input type="checkbox" checked={flagged} onChange={(e) => setFlagged(e.target.checked)} />
+            {t("userDrawer.connOnlyFlagged", { n: flaggedCount })}
+          </label>
         </div>
+        <details className="text-[13px]">
+          <summary className="cursor-pointer text-[var(--ink-600)]">{t("userDrawer.connWatchTitle", { n: watch.length })}</summary>
+          <textarea
+            className="input mono mt-2 min-h-20 py-2"
+            style={{ height: "auto" }}
+            value={watchText}
+            onChange={(e) => {
+              setWatchText(e.target.value);
+              saveWatch(e.target.value);
+            }}
+            placeholder="example.com, shop.example.org"
+            aria-label={t("userDrawer.connWatchTitle", { n: watch.length })}
+            spellCheck={false}
+          />
+          <p className="mt-1 text-xs text-[var(--ink-500)]">{t("userDrawer.connWatchHint")}</p>
+        </details>
         <input className="input" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("userDrawer.connectionsFilter")} aria-label={t("userDrawer.connectionsFilter")} spellCheck={false} />
         {down.length > 0 ? <p className="text-xs text-[var(--bad)]">{t("userDrawer.connectionsUnavailable", { nodes: down.join(", ") })}</p> : null}
         {log.isPending ? (
@@ -177,6 +233,7 @@ function GroupRow({ g, open, onToggle }: { g: Group; open: boolean; onToggle: ()
         <div className="min-w-0">
           <div className="truncate text-[13px] font-medium text-[var(--ink-900)]">
             {name}
+            <FlagBadge flag={g.target.flag} />
             {g.open > 0 ? <span className="ml-2 text-xs font-normal text-[var(--leaf-700)]">{t("userDrawer.connOpenCount", { n: g.open })}</span> : null}
           </div>
           <div className="truncate text-xs text-[var(--ink-500)]">
@@ -231,6 +288,7 @@ function LineRow({ l, named }: { l: Line; named?: boolean }) {
       <div className="truncate text-[13px] text-[var(--ink-900)]" title={c.dest}>
         {app ? <span className="font-medium">{app} · </span> : null}
         <span className="mono">{hostPort(l)}</span>
+        {named ? <FlagBadge flag={l.target.flag} /> : null}
       </div>
       <div className="num text-right text-[var(--ink-600)]">
         ↑ {bytes(c.up)} · ↓ {bytes(c.down)}
