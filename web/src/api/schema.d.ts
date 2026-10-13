@@ -1176,6 +1176,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Журнал соединений пользователя: куда идёт его трафик */
+        get: operations["user-connections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/devices": {
         parameters: {
             query?: never;
@@ -1667,6 +1684,33 @@ export interface components {
             /** @description Уведомления с 22:00 до 9:00 МСК приходят без звука */
             quiet_night: boolean;
             texts: components["schemas"]["Texts"];
+        };
+        ConnectionView: {
+            /** @description Куда шло соединение: хост и порт */
+            dest: string;
+            /** Format: int64 */
+            down: number;
+            /**
+             * Format: date-time
+             * @description Нет — соединение ещё открыто
+             */
+            ended_at?: string;
+            inbound: string;
+            /** @description Адрес устройства */
+            ip: string;
+            /** @enum {string} */
+            network: "tcp" | "udp";
+            node: string;
+            /** Format: int64 */
+            node_id: number;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: int64 */
+            up: number;
+        };
+        ConnectionsOutputBody: {
+            conns: components["schemas"]["ConnectionView"][];
+            unavailable: string[];
         };
         CreateInboundInputBody: {
             /** @description Шаблон листенера (YAML) для preset=custom */
@@ -6101,6 +6145,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "user-connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionsOutputBody"];
+                };
             };
             /** @description Error */
             default: {

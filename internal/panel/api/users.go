@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -282,6 +283,7 @@ func (h *handlers) registerUsers() {
 	huma.Register(h.api, huma.Operation{OperationID: "bulk-users", Method: http.MethodPost, Path: "/api/v1/users/bulk", Summary: "Массовое действие", Tags: tags}, h.bulkUsers)
 	huma.Register(h.api, huma.Operation{OperationID: "user-traffic", Method: http.MethodGet, Path: "/api/v1/users/{id}/traffic", Summary: "График трафика пользователя", Tags: tags}, h.userTraffic)
 	huma.Register(h.api, huma.Operation{OperationID: "user-devices", Method: http.MethodGet, Path: "/api/v1/users/{id}/devices", Summary: "Адреса, с которых заходил пользователь", Tags: tags}, h.userDevices)
+	huma.Register(h.api, huma.Operation{OperationID: "user-connections", Method: http.MethodGet, Path: "/api/v1/users/{id}/connections", Summary: "Журнал соединений пользователя: куда идёт его трафик", Tags: tags}, h.userConnections)
 	huma.Register(h.api, huma.Operation{OperationID: "user-bound-devices", Method: http.MethodGet, Path: "/api/v1/users/{id}/bound-devices", Summary: "Устройства, привязанные к подписке", Tags: tags}, h.boundDevices)
 	huma.Register(h.api, huma.Operation{OperationID: "unbind-device", Method: http.MethodDelete, Path: "/api/v1/users/{id}/bound-devices/{device}", Summary: "Отвязать устройство: его ключи сгорают", Tags: tags, DefaultStatus: http.StatusNoContent}, h.unbindDevice)
 }
@@ -715,3 +717,99 @@ func (h *handlers) userDevices(ctx context.Context, in *userIDInput) (*devicesOu
 	}
 	return out, nil
 }
+
+// ConnectionView is one line of a user's connection log.
+type ConnectionView struct {
+	NodeID    int64      `json:"node_id"`
+	Node      string     `json:"node"`
+	IP        string     `json:"ip" doc:"Адрес устройства"`
+	Inbound   string     `json:"inbound"`
+	Network   string     `json:"network" enum:"tcp,udp"`
+	Dest      string     `json:"dest" doc:"Куда шло соединение: хост и порт"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at,omitempty" doc:"Нет — соединение ещё открыто"`
+	Up        int64      `json:"up"`
+	Down      int64      `json:"down"`
+}
+
+type connectionsOutput struct {
+	Body struct {
+		Conns []ConnectionView `json:"conns"`
+		// Unavailable names the nodes that gave no log: offline, or older than the log.
+		Unavailable []string `json:"unavailable"`
+	}
+}
+
+// userConnectionsMax bounds one answer: the newest lines of all nodes.
+const userConnectionsMax = 1000
+
+// userConnections gathers the user's connection log from the nodes. The nodes keep it in
+// memory only; the panel stores none of it, and each look is written to the audit log.
+func (h *handlers) userConnections(ctx context.Context, in *userIDInput) (*connectionsOutput, error) {
+	// A "read" key looks at the panel, not at where its users go.
+	if hidesSecrets(ctx) {
+		return nil, huma.Error403Forbidden("session_only")
+	}
+	if _, err := h.d.Users.Get(ctx, in.ID); err != nil {
+		return nil, mapDomainErr(err)
+	}
+	out := &connectionsOutput{}
+	out.Body.Conns, out.Body.Unavailable = []ConnectionView{}, []string{}
+	slots, err := h.d.Store.Q.ListUserSlots(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := h.d.Store.Q.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	src, _ := h.d.Nodes.(interface {
+		Connections(ctx context.Context, id int64, slots []string) (nodeapi.Connections, error)
+	})
+	for _, n := range nodes {
+		if n.Enabled == 0 {
+			continue
+		}
+		if src == nil || len(slots) == 0 {
+			if src == nil {
+				out.Body.Unavailable = append(out.Body.Unavailable, n.Name)
+			}
+			continue
+		}
+		res, err := src.Connections(ctx, n.ID, slots)
+		if err != nil {
+			out.Body.Unavailable = append(out.Body.Unavailable, n.Name)
+			continue
+		}
+		for _, c := range res.Conns {
+			v := ConnectionView{NodeID: n.ID, Node: n.Name, IP: c.IP, Inbound: c.Inbound, Network: c.Network, Dest: c.Dest,
+				StartedAt: time.Unix(c.Start, 0).UTC(), Up: c.Up, Down: c.Down}
+			if c.End > 0 {
+				t := time.Unix(c.End, 0).UTC()
+				v.EndedAt = &t
+			}
+			out.Body.Conns = append(out.Body.Conns, v)
+		}
+	}
+	slices.SortStableFunc(out.Body.Conns, func(a, b ConnectionView) int { return b.StartedAt.Compare(a.StartedAt) })
+	if len(out.Body.Conns) > userConnectionsMax {
+		out.Body.Conns = out.Body.Conns[:userConnectionsMax]
+	}
+	// The card asks again every few seconds while it is open: one audit line per look.
+	admin := sessionOf(ctx).AdminID
+	key, now := [2]int64{admin, in.ID}, h.d.Now()
+	connViews.Lock()
+	seen := now.Sub(connViews.at[key]) < 10*time.Minute
+	connViews.at[key] = now
+	connViews.Unlock()
+	if !seen {
+		h.audit(ctx, admin, "user.view_connections", "user", strconv.FormatInt(in.ID, 10), nil)
+	}
+	return out, nil
+}
+
+// connViews is when each admin last read each user's connection log.
+var connViews = struct {
+	sync.Mutex
+	at map[[2]int64]time.Time
+}{at: map[[2]int64]time.Time{}}

@@ -303,6 +303,17 @@ func (m *Manager) Activity(ctx context.Context, id int64) (nodeapi.Activity, err
 	return c.Activity(ctx)
 }
 
+// Connections reads a node's connection log of the slots: where their traffic goes.
+func (m *Manager) Connections(ctx context.Context, id int64, slots []string) (nodeapi.Connections, error) {
+	c, err := clientOf[interface {
+		Connections(context.Context, []string) (nodeapi.Connections, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.Connections{}, err
+	}
+	return c.Connections(ctx, slots)
+}
+
 // CheckTarget tests a REALITY target from the node that dials it.
 func (m *Manager) CheckTarget(ctx context.Context, id int64, req nodeapi.TargetCheckRequest) (nodeapi.TargetResult, error) {
 	c, err := clientOf[interface {

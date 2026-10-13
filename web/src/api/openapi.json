@@ -1027,6 +1027,87 @@
         ],
         "type": "object"
       },
+      "ConnectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "dest": {
+            "description": "Куда шло соединение: хост и порт",
+            "type": "string"
+          },
+          "down": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ended_at": {
+            "description": "Нет — соединение ещё открыто",
+            "format": "date-time",
+            "type": "string"
+          },
+          "inbound": {
+            "type": "string"
+          },
+          "ip": {
+            "description": "Адрес устройства",
+            "type": "string"
+          },
+          "network": {
+            "enum": [
+              "tcp",
+              "udp"
+            ],
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "up": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "node",
+          "ip",
+          "inbound",
+          "network",
+          "dest",
+          "started_at",
+          "up",
+          "down"
+        ],
+        "type": "object"
+      },
+      "ConnectionsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "conns": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionView"
+            },
+            "type": "array"
+          },
+          "unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "conns",
+          "unavailable"
+        ],
+        "type": "object"
+      },
       "CreateInboundInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -9010,6 +9091,49 @@
           }
         },
         "summary": "Отвязать устройство: его ключи сгорают",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/connections": {
+      "get": {
+        "operationId": "user-connections",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Журнал соединений пользователя: куда идёт его трафик",
         "tags": [
           "users"
         ]

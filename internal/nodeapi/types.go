@@ -176,6 +176,29 @@ type ClientActivity struct {
 	Seen map[string]int64 `json:"seen"` // inbound name → unix time of the last admitted connection
 }
 
+// ConnectionsRequest asks for the connection log of some slots: one user's.
+type ConnectionsRequest struct {
+	Slots []string `json:"slots"`
+}
+
+// Connections is what the node remembers of the slots' traffic: the open connections
+// and the last closed ones. It lives in memory only and is gone with a restart.
+type Connections struct {
+	Conns []Conn `json:"conns"`
+}
+
+type Conn struct {
+	Slot    string `json:"slot"`
+	IP      string `json:"ip"`            // where the device connected from
+	Inbound string `json:"inbound"`       // the listener it came in through
+	Network string `json:"network"`       // tcp or udp
+	Dest    string `json:"dest"`          // host:port it went to
+	Start   int64  `json:"start"`         // unix time
+	End     int64  `json:"end,omitempty"` // unix time; 0: still open
+	Up      int64  `json:"up"`
+	Down    int64  `json:"down"`
+}
+
 // TargetCheckRequest asks the node to test a REALITY target from its own network: the
 // node is the one that dials it for every client handshake.
 type TargetCheckRequest struct {

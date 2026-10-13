@@ -154,6 +154,14 @@ func (c *Client) Activity(ctx context.Context) (Activity, error) {
 	return r, err
 }
 
+// Connections reads the connection log of the slots. A node older than the log answers
+// 404, which comes back as an error like any other.
+func (c *Client) Connections(ctx context.Context, slots []string) (Connections, error) {
+	var r Connections
+	err := c.do(ctx, http.MethodPost, "/v1/connections", ConnectionsRequest{Slots: slots}, &r, 10*time.Second)
+	return r, err
+}
+
 func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (TargetResult, error) {
 	var r TargetResult
 	err := c.do(ctx, http.MethodPost, "/v1/targets/check", req, &r, 20*time.Second)

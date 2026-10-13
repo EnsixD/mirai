@@ -100,6 +100,13 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Reg.Activity())
 	})
+	mux.HandleFunc("POST /v1/connections", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.ConnectionsRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		writeJSON(w, http.StatusOK, e.Reg.Connections(req.Slots))
+	})
 	mux.HandleFunc("POST /v1/targets/check", func(w http.ResponseWriter, r *http.Request) {
 		var req nodeapi.TargetCheckRequest
 		if !decode(w, r, &req) {

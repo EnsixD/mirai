@@ -8,6 +8,7 @@ export const qk = {
   userTraffic: (id: number) => ["users", "traffic", id] as const,
   devices: (id: number) => ["users", "devices", id] as const,
   boundDevices: (id: number) => ["users", "bound", id] as const,
+  connections: (id: number) => ["users", "connections", id] as const,
   tariffs: ["tariffs"] as const,
   inbounds: ["inbounds"] as const,
   presets: ["presets"] as const,
@@ -77,6 +78,16 @@ export function useDevices(id: number) {
     queryKey: qk.devices(id),
     queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/devices", { params: { path: { id } }, signal })),
     refetchInterval: 10_000,
+  });
+}
+
+/** The connection log the nodes keep of a user; asked only while its window is open. */
+export function useUserConnections(id: number, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.connections(id),
+    queryFn: ({ signal }) => unwrap(api.GET("/api/v1/users/{id}/connections", { params: { path: { id } }, signal })),
+    enabled,
+    refetchInterval: 5_000,
   });
 }
 
