@@ -1043,6 +1043,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "host": {
+            "description": "Имя сайта, если dest — IP-адрес и нода узнала имя",
+            "type": "string"
+          },
           "inbound": {
             "type": "string"
           },

@@ -50,8 +50,10 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 	s.addConn(c)
 	defer c.Close()
 	t.inner.HandleTCPConn(c, m)
-	// The sniffer may have learned the site's name by now; the log shows it.
-	s.setDest(c, m.RemoteAddress())
+	// The sniffer has read the site's name by now, when the client sent a bare IP.
+	if m.SniffHost != "" && m.DstIP.IsValid() {
+		s.learn(c, m.DstIP.String(), m.SniffHost)
+	}
 }
 
 func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
@@ -100,8 +102,9 @@ type countingConn struct {
 	now    func() time.Time
 	once   sync.Once
 
-	// For the connection log (connlog.go); dest is guarded by slot.mu.
+	// For the connection log (connlog.go); host is guarded by slot.mu.
 	dest     string
+	host     string // the site's name the sniffer read, when dest is a bare IP
 	started  time.Time
 	up, down atomic.Int64
 }

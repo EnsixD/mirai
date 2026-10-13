@@ -1,6 +1,7 @@
 package node
 
 import (
+	"net"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ const (
 	udpIdle = time.Minute
 	// udpFlows bounds the flows a slot follows at once; past it they are all closed.
 	udpFlows = 256
+	// namesKeep bounds the site names a slot remembers by address; past it it starts over.
+	namesKeep = 1024
 )
 
 type udpKey struct{ ip, inbound, dest string }
@@ -28,22 +31,40 @@ type udpFlow struct {
 	up, down    atomic.Int64
 }
 
-func (c *countingConn) record(end time.Time) nodeapi.Conn {
-	r := nodeapi.Conn{Slot: c.slot.name, IP: c.ip, Inbound: c.inName, Network: "tcp", Dest: c.dest,
+// recordLocked is the log line of a TCP connection; a zero end: still open. s.mu is held.
+func (s *slot) recordLocked(c *countingConn, end time.Time) nodeapi.Conn {
+	r := nodeapi.Conn{Slot: s.name, IP: c.ip, Inbound: c.inName, Network: "tcp", Dest: c.dest, Host: c.host,
 		Start: c.started.Unix(), Up: c.up.Load(), Down: c.down.Load()}
+	if r.Host == "" {
+		r.Host = s.nameLocked(c.dest)
+	}
 	if !end.IsZero() {
 		r.End = end.Unix()
 	}
 	return r
 }
 
-func (f *udpFlow) record(s *slot, k udpKey, open bool) nodeapi.Conn {
-	r := nodeapi.Conn{Slot: s.name, IP: k.ip, Inbound: k.inbound, Network: "udp", Dest: k.dest,
+// flowLocked is the log line of a UDP flow; s.mu is held.
+func (s *slot) flowLocked(k udpKey, f *udpFlow, open bool) nodeapi.Conn {
+	r := nodeapi.Conn{Slot: s.name, IP: k.ip, Inbound: k.inbound, Network: "udp", Dest: k.dest, Host: s.nameLocked(k.dest),
 		Start: f.start.Unix(), Up: f.up.Load(), Down: f.down.Load()}
 	if !open {
 		r.End = f.last.Unix()
 	}
 	return r
+}
+
+// nameLocked is the site last seen at dest's address: a connection that is still open,
+// or a UDP flow, gets the name a finished TCP connection to the same address had.
+func (s *slot) nameLocked(dest string) string {
+	if len(s.names) == 0 {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(dest)
+	if err != nil {
+		return ""
+	}
+	return s.names[host]
 }
 
 // logLocked adds a closed connection, dropping the oldest past connKeep; s.mu is held.
@@ -55,11 +76,23 @@ func (s *slot) logLocked(c nodeapi.Conn) {
 	s.recent = append(s.recent, c)
 }
 
-func (s *slot) setDest(c *countingConn, dest string) {
+// learn keeps the name the sniffer read for a connection to a bare IP.
+func (s *slot) learn(c *countingConn, ip, host string) {
+	if s.shared {
+		return
+	}
 	s.mu.Lock()
-	// A closed connection is in the log already, under the address it was opened with.
-	if _, open := s.conns[c]; open {
-		c.dest = dest
+	c.host = host
+	if s.names == nil || len(s.names) >= namesKeep {
+		s.names = map[string]string{}
+	}
+	s.names[ip] = host
+	// The connection may have been closed and logged before its name was known.
+	for i := len(s.recent) - 1; i >= 0 && i >= len(s.recent)-8; i-- {
+		if r := &s.recent[i]; r.Host == "" && r.Dest == c.dest && r.IP == c.ip && r.Start == c.started.Unix() {
+			r.Host = host
+			break
+		}
 	}
 	s.mu.Unlock()
 }
@@ -90,7 +123,7 @@ func (s *slot) flowOf(ip, inbound, dest string, now time.Time) *udpFlow {
 func (s *slot) sweepUDPLocked(now time.Time, all bool) {
 	for k, f := range s.udp {
 		if all || now.Sub(f.last) > udpIdle {
-			s.logLocked(f.record(s, k, false))
+			s.logLocked(s.flowLocked(k, f, false))
 			delete(s.udp, k)
 		}
 	}
@@ -113,10 +146,10 @@ func (r *Registry) Connections(names []string) nodeapi.Connections {
 		s.sweepUDPLocked(now, false)
 		out.Conns = append(out.Conns, s.recent...)
 		for c := range s.conns {
-			out.Conns = append(out.Conns, c.record(time.Time{}))
+			out.Conns = append(out.Conns, s.recordLocked(c, time.Time{}))
 		}
 		for k, f := range s.udp {
-			out.Conns = append(out.Conns, f.record(s, k, true))
+			out.Conns = append(out.Conns, s.flowLocked(k, f, true))
 		}
 		s.mu.Unlock()
 	}

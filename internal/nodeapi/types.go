@@ -189,12 +189,13 @@ type Connections struct {
 
 type Conn struct {
 	Slot    string `json:"slot"`
-	IP      string `json:"ip"`            // where the device connected from
-	Inbound string `json:"inbound"`       // the listener it came in through
-	Network string `json:"network"`       // tcp or udp
-	Dest    string `json:"dest"`          // host:port it went to
-	Start   int64  `json:"start"`         // unix time
-	End     int64  `json:"end,omitempty"` // unix time; 0: still open
+	IP      string `json:"ip"`             // where the device connected from
+	Inbound string `json:"inbound"`        // the listener it came in through
+	Network string `json:"network"`        // tcp or udp
+	Dest    string `json:"dest"`           // host:port it went to
+	Host    string `json:"host,omitempty"` // the site's name, when dest is a bare IP and the node learned it
+	Start   int64  `json:"start"`          // unix time
+	End     int64  `json:"end,omitempty"`  // unix time; 0: still open
 	Up      int64  `json:"up"`
 	Down    int64  `json:"down"`
 }
