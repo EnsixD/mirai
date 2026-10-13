@@ -50,6 +50,8 @@ type slot struct {
 	cleaned     time.Time             // when ips was last swept of devices that left
 	seenPruned  time.Time             // likewise for seen
 	pools       map[string]*bucket    // traffic pools of the slot, made on first use
+	recent      []nodeapi.Conn        // the connection log: the last closed ones, oldest first
+	udp         map[udpKey]*udpFlow   // UDP flows the log still counts as open
 }
 
 type ipUse struct {
@@ -364,6 +366,9 @@ func (s *slot) addConn(c *countingConn) {
 func (s *slot) closeConn(c *countingConn, now time.Time) {
 	s.mu.Lock()
 	delete(s.conns, c)
+	if !s.shared {
+		s.logLocked(c.record(now))
+	}
 	if u := s.ips[c.ip]; u != nil {
 		if u.open > 0 {
 			u.open--

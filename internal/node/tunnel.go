@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	N "github.com/metacubex/mihomo/common/net"
@@ -45,10 +46,12 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 		_ = conn.Close()
 		return
 	}
-	c := &countingConn{Conn: conn, slot: s, bucket: b, inName: m.InName, ip: ip, now: t.reg.now}
+	c := &countingConn{Conn: conn, slot: s, bucket: b, inName: m.InName, ip: ip, now: t.reg.now, dest: m.RemoteAddress(), started: t.reg.now()}
 	s.addConn(c)
 	defer c.Close()
 	t.inner.HandleTCPConn(c, m)
+	// The sniffer may have learned the site's name by now; the log shows it.
+	s.setDest(c, m.RemoteAddress())
 }
 
 func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
@@ -56,13 +59,19 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 		t.inner.HandleUDPPacket(p, m)
 		return
 	}
-	s, b := t.reg.admitIn(m.InUser, m.InName, m.SrcIP.Unmap().String(), false)
+	ip := m.SrcIP.Unmap().String()
+	s, b := t.reg.admitIn(m.InUser, m.InName, ip, false)
 	if s == nil {
 		p.Drop()
 		return
 	}
-	s.countIn(b, int64(len(p.Data())), 0)
-	t.inner.HandleUDPPacket(&countingPacket{UDPPacket: p, slot: s, bucket: b}, m)
+	n := int64(len(p.Data()))
+	s.countIn(b, n, 0)
+	f := s.flowOf(ip, m.InName, m.RemoteAddress(), t.reg.now())
+	if f != nil {
+		f.up.Add(n)
+	}
+	t.inner.HandleUDPPacket(&countingPacket{UDPPacket: p, slot: s, bucket: b, flow: f}, m)
 }
 
 func (t *Tunnel) NatTable() C.NatTable { return t.inner.NatTable() }
@@ -90,12 +99,18 @@ type countingConn struct {
 	ip     string
 	now    func() time.Time
 	once   sync.Once
+
+	// For the connection log (connlog.go); dest is guarded by slot.mu.
+	dest     string
+	started  time.Time
+	up, down atomic.Int64
 }
 
 func (c *countingConn) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
 	if n > 0 {
 		c.slot.countIn(c.bucket, int64(n), 0)
+		c.up.Add(int64(n))
 	}
 	return n, err
 }
@@ -104,16 +119,17 @@ func (c *countingConn) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
 	if n > 0 {
 		c.slot.countIn(c.bucket, 0, int64(n))
+		c.down.Add(int64(n))
 	}
 	return n, err
 }
 
 func (c *countingConn) UnwrapReader() (io.Reader, []N.CountFunc) {
-	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, n, 0) }}
+	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, n, 0); c.up.Add(n) }}
 }
 
 func (c *countingConn) UnwrapWriter() (io.Writer, []N.CountFunc) {
-	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, 0, n) }}
+	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, 0, n); c.down.Add(n) }}
 }
 
 func (c *countingConn) Close() error {
@@ -125,12 +141,16 @@ type countingPacket struct {
 	C.UDPPacket
 	slot   *slot
 	bucket *bucket
+	flow   *udpFlow // its line in the connection log; nil for a shared listener
 }
 
 func (p *countingPacket) WriteBack(b []byte, addr net.Addr) (int, error) {
 	n, err := p.UDPPacket.WriteBack(b, addr)
 	if n > 0 {
 		p.slot.countIn(p.bucket, 0, int64(n))
+		if p.flow != nil {
+			p.flow.down.Add(int64(n))
+		}
 	}
 	return n, err
 }

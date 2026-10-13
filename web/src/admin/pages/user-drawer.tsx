@@ -1,5 +1,5 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
-import { CalendarPlus, MoreHorizontal, Power, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarPlus, MoreHorizontal, Power, RefreshCw, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { errorText, type User } from "../../api/client";
 import { onePeriod, userActions, useUser, useUserMutation } from "../../api/hooks";
@@ -14,6 +14,7 @@ import { PoolsSection, TariffSection, TrafficSection } from "./user/traffic";
 import { ExpirySection } from "./user/expiry";
 import { NoteSection, ProtocolsSection, SubscriptionSection, TelegramSection } from "./user/access";
 import { DevicesSection } from "./user/devices";
+import { ConnectionsDialog } from "./user/connections";
 
 export function UserDrawer({ id, onClose }: { id?: number; onClose: () => void }) {
   const user = useUser(id);
@@ -61,6 +62,7 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
   const reissue = useUserMutation(userActions.reissue);
   const remove = useUserMutation(userActions.remove);
   const [confirm, setConfirm] = useState<"reissue" | "delete" | null>(null);
+  const [connections, setConnections] = useState(false);
   const fail = (e: unknown) => toast.error(errorText(e));
   const disabled = u.state === "disabled";
 
@@ -83,6 +85,9 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
           }
         >
           <Power size={18} aria-hidden /> {disabled ? t("common.enable") : t("users.disable")}
+        </Button>
+        <Button onClick={() => setConnections(true)}>
+          <ScrollText size={18} aria-hidden /> {t("userDrawer.connections")}
         </Button>
         <Button className="text-[var(--bad)]" loading={remove.isPending} onClick={() => setConfirm("delete")}>
           <Trash2 size={18} aria-hidden /> {t("userDrawer.delete")}
@@ -117,6 +122,8 @@ function UserBody({ u, onDeleted }: { u: User; onDeleted: () => void }) {
       <DevicesSection u={u} />
       <ProtocolsSection u={u} />
       <NoteSection u={u} />
+
+      <ConnectionsDialog u={u} open={connections} onOpenChange={setConnections} />
 
       <Confirm
         open={confirm === "reissue"}
