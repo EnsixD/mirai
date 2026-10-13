@@ -11,7 +11,7 @@ func TestClientRoutingIsolation(t *testing.T) {
 	incy := `{"Name":"INCY Mirai","ProxySites":["example.com"]}`
 	cfg := Config{HappRules: happ, INCYRules: incy}
 	for _, tc := range []struct{ ua, app, profile string }{
-		{"Happ/3", "happ", happ}, {"INCY/1", "incy", incy},
+		{"Happ/3", "happ", happ}, {"INCY/1", "incy", incy}, {"2trillion_PC", "happ", happ},
 		{"Clash", "", ""}, {"v2rayNG", "", ""},
 	} {
 		h := http.Header{}
