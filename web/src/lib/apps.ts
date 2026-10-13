@@ -3,6 +3,9 @@
 
 export type ServiceKind = "dns" | "push" | "check" | "ads";
 
+/** What the admin wants to notice in a log: adult sites, Tor, and the sites of their own list. */
+export type Flag = "adult" | "tor" | "watch";
+
 export type Target = {
   /** What lines are grouped by. */
   key: string;
@@ -10,6 +13,7 @@ export type Target = {
   name: string;
   kind: "app" | "site" | "service" | "ip";
   service?: ServiceKind;
+  flag?: Flag;
 };
 
 // App → the domains it talks to (a subdomain matches too; the longest match wins).
@@ -78,6 +82,31 @@ const APPS: Record<string, string> = {
   Fastly: "fastly.net fastlylb.net",
 };
 
+// Adult sites with the CDN domains their video comes from.
+const ADULT: Record<string, string> = {
+  Pornhub: "pornhub.com pornhub.org pornhub.net phncdn.com pornhubpremium.com",
+  XVideos: "xvideos.com xvideos-cdn.com xvideos.es xv-ru.com",
+  XNXX: "xnxx.com xnxx-cdn.com",
+  xHamster: "xhamster.com xhcdn.com xhamster.desi xhamster2.com xhamsterlive.com",
+  RedTube: "redtube.com rdtcdn.com",
+  YouPorn: "youporn.com ypncdn.com",
+  Tube8: "tube8.com t8cdn.com",
+  SpankBang: "spankbang.com sb-cd.com spankbang.party",
+  OnlyFans: "onlyfans.com",
+  Fansly: "fansly.com",
+  Chaturbate: "chaturbate.com highwebmedia.com",
+  Stripchat: "stripchat.com strpst.com doppiocdn.com",
+  BongaCams: "bongacams.com bongacams.ru bngpt.com",
+  LiveJasmin: "livejasmin.com dditscdn.com",
+};
+
+// Other adult sites, each under its own domain.
+const ADULT_SITES =
+  "eporner.com youjizz.com txxx.com hclips.com beeg.com tnaflix.com porntrex.com porn.com hqporner.com motherless.com cam4.com myfreecams.com camsoda.com brazzers.com bangbros.com realitykings.com naughtyamerica.com rule34.xxx e-hentai.org exhentai.org nhentai.net hanime.tv hentaihaven.xxx literotica.com daftsex.com sex.com pornpics.com erome.com porno365.com pornolab.net sexvid.xxx drtuber.com sunporno.com 4tube.com porndig.com xxxbunker.com fapello.com coomer.su kemono.su thothub.to pornone.com pornhat.com ok.xxx fuq.com tubegalore.com ixxx.com thumbzilla.com keezmovies.com extremetube.com mofos.com digitalplayground.com adulttime.com manyvids.com clips4sale.com iwara.tv gelbooru.com danbooru.donmai.us e621.net luscious.net hitomi.la";
+
+// Domain zones that hold adult sites only.
+const ADULT_ZONES = new Set(["xxx", "porn", "sex", "adult", "sexy"]);
+
 // What a phone does by itself, whatever its owner is doing: the log folds it away.
 const SERVICES: Record<ServiceKind, string> = {
   dns: "dns.google dns.google.com cloudflare-dns.com one.one.one.one dns.quad9.net dns.adguard.com dns.adguard-dns.com dns.nextdns.io dns.yandex.ru",
@@ -119,6 +148,12 @@ for (const [kind, domains] of Object.entries(SERVICES) as [ServiceKind, string][
   for (const d of domains.split(" ")) bySuffix.set(d, { key: `~${kind}`, name: kind, kind: "service", service: kind });
 }
 
+for (const [name, domains] of Object.entries(ADULT)) {
+  for (const d of domains.split(" ")) bySuffix.set(d, { key: name, name, kind: "app", flag: "adult" });
+}
+for (const d of ADULT_SITES.split(" ")) bySuffix.set(d, { key: d, name: d, kind: "site", flag: "adult" });
+for (const d of ["torproject.org", "torproject.net", "tor.eff.org"]) bySuffix.set(d, { key: "Tor", name: "Tor", kind: "app", flag: "tor" });
+
 const service = (kind: ServiceKind): Target => ({ key: `~${kind}`, name: kind, kind: "service", service: kind });
 
 function v4(ip: string): number | null {
@@ -157,20 +192,36 @@ export function splitDest(dest: string): { host: string; port: number } {
   return { host: dest.slice(0, i).replace(/^\[|\]$/g, ""), port: Number(dest.slice(i + 1)) || 0 };
 }
 
-/** Whose traffic a connection is: by the site's name when there is one, else by the address. */
-export function classify(name: string, addr: string, port: number): Target {
+/** Reads the admin's own list: domains separated by spaces, commas or line breaks. */
+export function parseWatch(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[\s,;]+/)
+    .map((d) => d.replace(/^https?:\/\//, "").replace(/^\*?\./, "").replace(/[/:].*$/, ""))
+    .filter((d) => d.includes("."));
+}
+
+/**
+ * Whose traffic a connection is: by the site's name when there is one, else by the address.
+ * `watch` is the admin's own list of domains; a site on it is flagged whatever else it is.
+ */
+export function classify(name: string, addr: string, port: number, watch: readonly string[] = []): Target {
   if (port === 53 || port === 853 || DNS_IPS.has(addr)) return service("dns");
   if (port === 123) return service("check");
   const host = name.toLowerCase().replace(/\.$/, "");
   if (host && v4(host) === null && !host.includes(":")) {
+    const mine = watch.find((d) => host === d || host.endsWith(`.${d}`));
+    if (mine) return { key: mine, name: mine, kind: "site", flag: "watch" };
     const labels = host.split(".");
     for (let i = 0; i < labels.length - 1; i++) {
       const hit = bySuffix.get(labels.slice(i).join("."));
       if (hit) return hit;
     }
     const site = siteOf(host);
-    return { key: site, name: site, kind: "site" };
+    return { key: site, name: site, kind: "site", flag: ADULT_ZONES.has(labels[labels.length - 1]!) ? "adult" : undefined };
   }
+  // Tor relays listen on these ports by default; a bridge on 443 looks like any site.
+  if (port === 9001 || port === 9030) return { key: "Tor", name: "Tor", kind: "app", flag: "tor" };
   const n = v4(addr);
   if (n !== null) {
     const net = nets.find((r) => n >= r.from && n < r.to);
