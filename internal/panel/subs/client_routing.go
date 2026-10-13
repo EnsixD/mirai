@@ -41,7 +41,8 @@ func ClientRoutingHeader(h http.Header, userAgent string, cfg Config) {
 	ua := strings.ToLower(userAgent)
 	var app, profile string
 	switch {
-	case strings.Contains(ua, "happ"):
+	// 2trillion's own apps read Happ's profile and its happ:// deeplink.
+	case strings.Contains(ua, "happ"), strings.Contains(ua, "2trillion"):
 		app, profile = "happ", cfg.HappRules
 	case strings.Contains(ua, "incy"):
 		app, profile = "incy", cfg.INCYRules
