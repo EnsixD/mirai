@@ -90,6 +90,12 @@ export function createAppRouter(queryClient: QueryClient) {
   const promocodes = createRoute({ getParentRoute: () => app, path: "/promocodes", component: page(() => import("./pages/promocodes"), "PromocodesPage") });
   const payments = createRoute({ getParentRoute: () => app, path: "/payments", component: page(() => import("./pages/payments"), "PaymentsPage") });
   const routeTree = root.addChildren([login, app.addChildren([dashboard, users, tariffs, inbounds, nodes, promocodes, payments, telegram, settings])]);
+  // The pages' code is fetched in the background once the first screen is up: opening a
+  // section then never waits for its chunk, so no placeholder flashes in between.
+  const pages: { options: { component?: unknown } }[] = [dashboard, users, tariffs, inbounds, nodes, promocodes, payments, telegram, settings];
+  setTimeout(() => {
+    for (const r of pages) void (r.options.component as { preload?: () => Promise<void> } | undefined)?.preload?.();
+  }, 1500);
   return createRouter({
     routeTree,
     basepath: basePath || "/",

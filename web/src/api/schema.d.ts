@@ -1695,6 +1695,8 @@ export interface components {
              * @description Нет — соединение ещё открыто
              */
             ended_at?: string;
+            /** @description Имя сайта, если dest — IP-адрес и нода узнала имя */
+            host?: string;
             inbound: string;
             /** @description Адрес устройства */
             ip: string;

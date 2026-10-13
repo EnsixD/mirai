@@ -726,6 +726,7 @@ type ConnectionView struct {
 	Inbound   string     `json:"inbound"`
 	Network   string     `json:"network" enum:"tcp,udp"`
 	Dest      string     `json:"dest" doc:"Куда шло соединение: хост и порт"`
+	Host      string     `json:"host,omitempty" doc:"Имя сайта, если dest — IP-адрес и нода узнала имя"`
 	StartedAt time.Time  `json:"started_at"`
 	EndedAt   *time.Time `json:"ended_at,omitempty" doc:"Нет — соединение ещё открыто"`
 	Up        int64      `json:"up"`
@@ -782,7 +783,7 @@ func (h *handlers) userConnections(ctx context.Context, in *userIDInput) (*conne
 			continue
 		}
 		for _, c := range res.Conns {
-			v := ConnectionView{NodeID: n.ID, Node: n.Name, IP: c.IP, Inbound: c.Inbound, Network: c.Network, Dest: c.Dest,
+			v := ConnectionView{NodeID: n.ID, Node: n.Name, IP: c.IP, Inbound: c.Inbound, Network: c.Network, Dest: c.Dest, Host: c.Host,
 				StartedAt: time.Unix(c.Start, 0).UTC(), Up: c.Up, Down: c.Down}
 			if c.End > 0 {
 				t := time.Unix(c.End, 0).UTC()

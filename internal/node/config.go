@@ -58,6 +58,20 @@ func outbounds(st nodeapi.DesiredState) ([]any, error) {
 	return out, nil
 }
 
+// sniffer reads the site's name from the first bytes of a connection to a bare IP (the
+// TLS SNI, the HTTP Host, the QUIC ClientHello), for the connection log only: the
+// destination is not replaced, so the traffic goes where the client sent it.
+var sniffer = map[string]any{
+	"enable":               true,
+	"parse-pure-ip":        true,
+	"override-destination": false,
+	"sniff": map[string]any{
+		"TLS":  map[string]any{"ports": []string{"443", "8443"}},
+		"HTTP": map[string]any{"ports": []string{"80", "8080"}},
+		"QUIC": map[string]any{"ports": []string{"443", "8443"}},
+	},
+}
+
 // buildConfig renders the mihomo config as JSON, which mihomo's YAML parser accepts.
 // log-level warning keeps per-connection lines out of mihomo's own output; the ones that
 // still come through are dropped by pumpLogs.
@@ -100,6 +114,7 @@ func buildConfig(st nodeapi.DesiredState, cert proto.Cert, allowPrivate bool) (r
 		"find-process-mode": "off",
 		"profile":           map[string]any{"store-selected": false, "store-fake-ip": false},
 		"dns":               map[string]any{"enable": false},
+		"sniffer":           sniffer,
 		"proxies":           proxies,
 		"rules":             rules(st, allowPrivate),
 		"listeners":         listeners,
