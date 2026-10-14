@@ -236,7 +236,9 @@ case "$1" in
  logs) shift; if [ "$1" = node ]; then shift; exec journalctl -u mirai-node "$@"; else exec journalctl -u mirai "$@"; fi ;;
  status) if [ -n "$MIRAI_DATABASE_URL" ]; then exec systemctl status mirai mirai-node --no-pager; else exec systemctl status mirai-node --no-pager; fi ;;
  update) exec python3 /opt/mirai/update.py ;;
- *) exec /opt/mirai/mirai "$@" ;;
+ *) # As the service's user: files root writes here (a node's certificate) the panel could not read.
+  if [ "$(id -u)" = 0 ] && id -u mirai >/dev/null 2>&1; then exec setpriv --reuid=mirai --regid=mirai --init-groups /opt/mirai/mirai "$@"; fi
+  exec /opt/mirai/mirai "$@" ;;
 esac
 ''', 0o755)
     write('/etc/systemd/system/mirai-update.service', '[Unit]\nDescription=Verified Mirai update\n[Service]\nType=oneshot\nExecStart=/usr/bin/python3 /opt/mirai/update.py --requested\n')
