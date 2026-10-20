@@ -231,6 +231,12 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		delete(e.errs, name)
 	}
 	e.errsMu.Unlock()
+	// mihomo starts the new listeners before it closes the ones that are gone, so an
+	// inbound renamed on the same port would find it still held by its old name. The
+	// listeners that stay go first, dropping the rest; then the new names bind.
+	if kept := keptListeners(cfg.Listeners, e.listeners); len(kept) < len(e.listeners) {
+		listener.PatchInboundListeners(kept, e.tun, true)
+	}
 	listener.PatchInboundListeners(cfg.Listeners, e.tun, true)
 	e.syncLogs()
 
@@ -468,6 +474,18 @@ func withoutRejected(names []string, rejected []nodeapi.ListenerStatus) []string
 		bad[r.Name] = true
 	}
 	return slices.DeleteFunc(names, func(n string) bool { return bad[n] })
+}
+
+// keptListeners is the part of next whose names were already applied: patched alone,
+// it closes the listeners that are gone before any new name binds their port.
+func keptListeners(next map[string]C.InboundListener, applied map[string]nodeapi.ListenerStatus) map[string]C.InboundListener {
+	kept := make(map[string]C.InboundListener, len(next))
+	for name, l := range next {
+		if _, ok := applied[name]; ok {
+			kept[name] = l
+		}
+	}
+	return kept
 }
 
 func changedInbounds(prev, next nodeapi.DesiredState) []string {
