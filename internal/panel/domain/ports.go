@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 
@@ -84,6 +85,13 @@ func NodePorts(ctx context.Context, q *db.Queries, node db.Node) (PortMap, error
 			if p > 0 {
 				m.add(PortHolder{Kind: s.kind}, strconv.Itoa(p), "tcp", false)
 			}
+		}
+		// Behind nginx the panel listens on a port of its own (2053 by default, the first
+		// of PortPool): a relay or an inbound there keeps the panel from starting.
+		if _, p, err := net.SplitHostPort(os.Getenv("MIRAI_PANEL_LISTEN")); err == nil {
+			m.add(PortHolder{Kind: PortPanel}, p, "tcp", false)
+		} else if os.Getenv("MIRAI_PANEL_LISTEN") == "" {
+			m.add(PortHolder{Kind: PortPanel}, "2053", "tcp", false)
 		}
 	} else if _, p, err := net.SplitHostPort(node.Address); err == nil {
 		m.add(PortHolder{Kind: PortNodeAPI}, p, "tcp", false)
