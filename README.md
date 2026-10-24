@@ -1,212 +1,147 @@
-# Mirai
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-en-dark.svg">
+  <img src=".github/assets/banner-en-light.svg" alt="Mirai — Your network. Clearly managed." width="1280">
+</picture>
 
-A VPN panel on the [mihomo](https://github.com/MetaCubeX/mihomo) core. Based on [mikan](https://github.com/Miroshka000/mikan) by Miroshka (GPL-3.0); see [NOTICE.md](NOTICE.md).
+**A self-hosted VPN panel with subscriptions, Telegram and multi-node management.**
 
----
+[![Release](https://img.shields.io/github/v/release/EnsixD/mirai?label=release&color=bf927c)](https://github.com/EnsixD/mirai/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-8caaa0)](LICENSE)
+[![Linux](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-929fc1)](#install)
 
-## Install
+[Install](#install) · [Screenshots](#screenshots) · [Telegram](#telegram) · [Updates](#updates)
+</div>
 
-On a fresh Ubuntu 22.04+ or Debian 12+ server (amd64 or arm64):
+## Built for everyday administration
 
-```bash
-curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh | sudo bash
-```
+Mirai brings VPN infrastructure and subscription management into one interface, powered by the [mihomo](https://github.com/MetaCubeX/mihomo) core.
 
-The installer asks for the panel language and an optional domain, checks that the domain points to the server, installs Docker if needed, picks REALITY camouflage sites next to your server and prints your admin link. Run `mirai` again at any time for the management menu.
+| Workflow | What Mirai provides |
+| --- | --- |
+| Monitor | CPU/vCPU, RAM, disk, traffic charts and subscription status |
+| Connect | Inbound templates, names with flags and emoji, remote nodes |
+| Manage | Traffic limits, devices, extension, freezing and deletion |
+| Sell | Plans, a one-time trial, traffic packages, promo codes and built-in YooKassa with separate test/live shops |
+| Automate | A built-in Telegram bot with customer and private admin menus |
+| Route | Happ and INCY deeplink profiles, plus Clash routing rules |
+| Customize | Mirai and Midnight themes, animated modals, draggable bot buttons |
 
-A node for an existing panel: the panel's **Nodes** page (or `mirai node add`) gives the command with its key:
-
-```bash
-curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh | sudo bash -s -- --join KEY
-```
-
-Without questions, for scripts: `… | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com` (all flags: `mirai install --help`).
-
-## Why mirai
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🛡️ Survives blocking on its own
-mirai watches whether real clients still reach each protocol. When a port gets blocked on the way, it moves the protocol to a free HTTPS port; when a REALITY camouflage site stops working, it picks a new one next to your server.
-
-</td>
-<td width="50%" valign="top">
-
-### 📱 Every app gets what it can use
-Subscriptions detect the app — Happ, v2RayTun, Koala Clash, SlothClash, Clash Verge, FlClash, ClashFest, Hiddify, Shadowrocket and more — and hand it only the protocols it actually supports. No more “it doesn't work for me”.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 📊 Byte-exact accounting
-mihomo is embedded as a library, so traffic is counted per user on every connection — not sampled. Plans by time and gigabytes, billing days, device limits and device binding against key sharing. Since every connection is known by its user, the torrent blocker bans the one who torrents on every node, not a shared IP.
-
-</td>
-<td valign="top">
-
-### 🤖 Telegram bot and Mini App built in
-Subscribers check their plan, devices and connection guides in a bot you set up in the panel, open the subscription page as a Telegram Mini App and get notified before it expires. They can also buy and renew — Telegram Stars, cards and SBP through YooKassa, or crypto through CryptoBot — and the panel hands out the link by itself. Broadcasts respect Telegram's limits.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🪶 Light as a mandarin
-Go and PostgreSQL, three small containers. On a working server with clients: **~14 MB RAM** for the panel, **~50 MB** for the database, **~40 MB** for the VPN core.
-
-</td>
-<td valign="top">
-
-### 🔒 Locked down by default
-Secret admin link on a random port, HTTPS with Let's Encrypt (even for a bare IP), argon2id, TOTP 2FA, CSRF protection, strict CSP, audit log. Containers run non-root, read-only, with all capabilities dropped.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-### 🌐 WARP and server cascades
-Each node can have its own WARP — registered in one click or from your WireGuard config — and protocols can leave through another node of the panel (client → node A → node B → internet). Chosen protocols, domains and networks take those ways out, everything else goes direct.
-
-</td>
-<td valign="top">
-
-### 🧩 API and keys for integrations
-A REST API documented right in the panel, with read-only or full-access keys for bots, billing and monitoring.
-
-</td>
-</tr>
-</table>
-
-## Promo codes
-
-Admins can create discount codes and codes for bonus days or traffic. Subscribers apply
-codes in the Telegram Mini App, which also shows their redemption history. Bonus traffic
-can go to the main balance or a selected pool. Discounted invoices are available only
-through payment methods that support refunds: Telegram Stars and adapters that advertise
-refund support. Mirai can then return a payment if its promo reservation expires before
-the provider confirms it.
-
-## Support access
-
-When you need help, you open a temporary access yourself: Settings → Support, for 2, 6 or 24 hours, at the "view", "change" or "terminal" level. Without that button nobody, mirai's developers included, gets into the panel: the project has no standing access to your servers, and the panel connects nowhere by itself. Every operator action goes into the audit log, access is revoked with one button, and the terminal needs your password and 2FA and is recorded. To turn the feature off for good, use the switch on the same card or run `mirai support-access off` on the server. Paid support rules: [on the website](https://miroshka000.github.io/mirai/support/paid/).
+Fresh installations start with **no customers, subscriptions, tariffs, payment credentials or published inbounds**. Default Telegram copy is included; all credentials and service settings belong to the installation owner.
 
 ## Screenshots
 
-<table>
-<tr>
-</tr>
-<tr>
-</tr>
-</table>
+Current Mirai interface in Russian. These screenshots use an isolated demonstration database: all users, subscriptions, traffic and node metrics shown here are fictional.
 
-<p align="center">
-&nbsp;&nbsp;
-</p>
+### Overview
 
-## Protocols
+![Mirai overview with system metrics and subscription statistics](.github/assets/screens/ru/overview.webp)
 
-Seventeen protocols, each a preset with keys generated for you. The subscription gives every app only what it runs:
+### Users
 
-| Protocol | Clash apps<br><sub>mihomo core</sub> | Xray apps<br><sub>Happ, v2RayTun</sub> | sing-box apps<br><sub>Hiddify, Karing</sub> |
-|---|:---:|:---:|:---:|
-| VLESS · REALITY · Vision | ✅ | ✅ | ✅ |
-| VLESS · REALITY · XHTTP | ✅ | ✅ | — |
-| VLESS · REALITY · gRPC | ✅ | ✅ | ✅ |
-| VLESS PQ (post-quantum encryption) | ✅ | ✅ | — |
-| Trojan · REALITY | ✅ | ✅ | ✅ |
-| VLESS · TLS · XHTTP | ✅ | ✅ | — |
-| VLESS · TLS · Vision | ✅ | ✅ | ✅ |
-| Hysteria2 | ✅ | ✅ | ✅ |
-| TUIC v5 | ✅ | — | ✅ |
-| AnyTLS | ✅ | — | ✅ |
-| TrustTunnel | ✅ | — | — |
-| ShadowQUIC | ✅ | — | — |
-| Mieru | ✅ | — | — |
-| Shadowsocks-2022 ¹ | ✅ | ✅ | ✅ |
-| Sudoku ¹ | ✅ | — | — |
-| Snell ¹ | ✅ | — | — |
-| VMess (custom config) | ✅ | ✅ | ✅ |
+![Mirai users with plans, traffic limits and subscription status](.github/assets/screens/ru/users.webp)
 
-<sub>¹ One key for all users in mihomo: no per-user accounting or limits on these. Newer protocols are sent to Clash apps only when their core is new enough.</sub>
+## Install
 
-## How it works
+On a fresh **Ubuntu 22.04+ or Debian 12+** server, **amd64 or arm64**:
 
-```mermaid
-flowchart LR
-    A[Browser] -- HTTPS, secret link --> P[mirai panel<br>users · plans · subscriptions]
-    P -- unix socket / pinned TLS --> N1[mirai node<br>mihomo inside]
-    P -- pinned TLS --> N2[remote node]
-    C[VPN apps] -- REALITY · QUIC · … --> N1
-    C --> N2
-    C -. subscription .-> P
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh | sudo bash
 ```
 
-The panel and the node are two processes from one image. Update or restart the panel — VPN keeps running. Add remote nodes with a join key from the **Nodes** page.
+The native installer installs verified binaries, PostgreSQL and Nginx, then starts the panel and its local VPN node as separate systemd services. **Docker and build tools are not required for the panel or VPN nodes.**
 
-## Managing the server
+Supply a domain with an A/AAAA record pointing to your server to enable HTTPS. The installer checks DNS and obtains or reuses a Let's Encrypt certificate. Ports 80 and 443 must be reachable. On completion it prints the full panel URL, administrator login and password, and saves them to `/root/mirai-login.txt` with root-only permissions.
 
-Run `mirai` for the menu, or use the commands directly:
+For unattended installation:
 
-| Command | What it does |
-|---|---|
-| `mirai status` | containers, versions, health, available update |
-| `mirai logs [panel\|node]` | live logs |
-| `mirai url` | admin link |
-| `mirai reset-password` · `reset-path` · `disable-2fa` | regain access |
-| `mirai update` | update now (backup first, automatic rollback) |
-| `mirai backup` · `restore FILE` | backups in `/opt/mirai/backups` |
-| `mirai node …` · `mirai inbound …` | nodes and protocols |
-| `mirai targets scan` · `apply` | REALITY camouflage sites next to the server |
-| `mirai join KEY` | on a node: take a new key from the panel |
-| `mirai restart` | restart the containers |
-| `mirai doctor` | check the server: Docker, ports, firewall, clock, DNS, disk |
-| `mirai support CODE` | send diagnostics to a support ticket when the panel is down |
-| `mirai support-access on\|off` | allow or forbid support access on this server |
-| `mirai api-lockdown [status\|off]` | on a node: the state of the "node API from the panel's IP only" rule, or lift it at once |
-| `mirai uninstall` | stop and remove the command, keep the data |
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh \
+  | sudo bash -s -- --yes --lang en --domain vpn.example.com --email you@example.com
+```
+
+Without a domain the panel uses HTTP. Choose a REALITY camouflage target before publishing an inbound. With a domain, new REALITY templates on the local node default to the panel's own HTTPS website. Choose a VPN port that does not conflict with the public panel port.
+
+### Add a remote VPN node
+
+Create a node in the main panel's **Nodes** page and copy its join key. On the remote server:
+
+```sh
+curl -fsSL https://github.com/EnsixD/mirai/releases/latest/download/install.sh \
+  | sudo bash -s -- --join KEY
+```
+
+A remote node runs the VPN core and a certificate-pinned management connection. It **does not run a second admin panel**. Allow the management port shown in the generated command and the VPN ports you publish through your firewall.
+
+### Manage the installation
+
+```sh
+mirai status
+mirai update
+mirai reset-password
+journalctl -u mirai -u mirai-node --no-pager -n 100
+```
+
+Configuration lives in `/etc/mirai/mirai.env`, runtime data in `/var/lib/mirai`, and verified binaries in `/opt/mirai`. See [native deployment details](scripts/native/README.md).
+
+## Telegram
+
+The bot runs inside the panel. Add a BotFather token and your numeric administrator ID in **Telegram**. Admin actions check that ID on every request.
+
+Upload a PNG or JPEG banner in Telegram settings. The photo, caption, and buttons share one message; navigation edits its caption in place. Screens exceeding Telegram�s caption limit fall back to full text without truncation. Administrator actions notify the account owner about grants, extensions, device limits, access changes, and closed orders. These notices can be disabled in the panel.
+
+```text
+/start → VPN description
+         🛒 Buy · 🔄 Renew
+         👤 Profile · 📖 Instructions
+         ⚙️ Admin panel — administrator only
+
+Profile → purchase statistics → 📋 My subscriptions · 🧾 My orders
+Renew → choose a subscription → choose a term → payment
+My orders → resume payment · verify status · close order
+My subscriptions → choose a subscription → details → 📱 Devices (count)
+Devices → tap a device to clear it, or 🧹 Clear all
+```
+
+Visitors who send `/start` or interact with the bot appear in the panel with their Telegram identity. Telegram does not notify bots when someone merely opens an idle chat.
+
+Customer and admin buttons support drag ordering and deletion, with a consistent compact two-column layout. Texts, notifications, device reset quotas and admin actions are configured in the panel. The selected trial plan appears under **Buy**, can be claimed once per Telegram account, and disappears after use.
+
+The private admin menu includes users, keys, pending orders, broadcasts, maintenance and refresh. Customer cards offer issuing a key, their keys, blocking and deletion; subscription cards expose the connection link, expiry, device cap and connected devices. Destructive actions and broadcasts require confirmation. Maintenance can also be controlled from the panel; it pauses the customer bot menu while subscription access and payment reconciliation continue.
+
+## Connections and routing
+
+The catalog includes **VLESS TCP REALITY**, **VLESS gRPC REALITY**, **VLESS WebSocket TLS**, **VLESS XHTTP REALITY**, **Hysteria2**, **Trojan REALITY**, and an XHTTP post-quantum preset. Custom templates are validated before saving.
+
+WebSocket uses ordinary TLS: REALITY over WebSocket is rejected. Supported XHTTP options reach client profiles; unknown options are rejected. Clash subscriptions include a final reject rule so an unsupported UDP transport cannot silently fall through to DIRECT. Explicit direct-routing rules still apply.
+
+Subscription URLs can use a separate domain and a root path such as `https://subs.example.com/A7b2X9mQ4`. New IDs use configurable random letters and digits, 9–32 characters. Existing links remain valid. Inbound display names preserve emoji and flags in compatible clients.
+
+Traffic for devices bound to distinct HWID slots is displayed in the panel, subscription page and bot. Clients sharing one slot share its counters; this is not an exact per-IP breakdown.
 
 ## Updates
 
-The panel checks for a new release once a day and shows what changed. Turn on **auto-update** in settings, or press **Update**: the host updater pulls the image from GitHub Packages, backs up, migrates the database, restarts and rolls back if the new version does not come up healthy. Every release manifest is signed.
+Mirai starts at **0.5.0**. Native releases use `native-vX.Y.Z` and include both architectures. The settings icon indicates an available panel update.
 
-On 0.4.4 or older, update to 0.4.5 first; the move to 0.5 and PostgreSQL then comes through the Update button too. If you skipped 0.4.5, the install command above updates an existing server.
+The updater verifies an **Ed25519-signed manifest** and archive SHA-256, backs up binaries and PostgreSQL, then restarts services. A failed health check triggers restoration of the saved installation and database. Backups remain in `/var/backups/mirai`. Automatic updates are disabled by default and can be enabled in Settings.
 
-## Building from source
+Default service limits are **256 MB** for the panel and **448 MB** for the VPN node. Idle usage is much lower; capacity depends on protocols, traffic and concurrent connections. PostgreSQL, Nginx and the operating system also need memory.
 
-```bash
-docker buildx build -t mirai:dev .            # panel + node image
-cd web && pnpm install && pnpm dev            # admin UI with hot reload
-MIRAI_TEST_DATABASE_URL=postgres://… go test ./...   # Go 1.27, a test PostgreSQL 18 and pg_dump
-cd installer && cargo test                    # the installer (Rust)
+## Development
+
+Mirai uses Go, PostgreSQL, React, TypeScript and Vite. The UI is embedded into the panel binary.
+
+```sh
+cd web
+pnpm install --frozen-lockfile
+pnpm build
+cd ..
+go build ./cmd/mirai
+go build ./cmd/mirai-node
 ```
 
-Development happens on the `dev` branch; pull requests into `main` are built and tested, releases are published from tags.
+The native release workflow compiles all Go packages and runs current Mirai contract and safety tests against PostgreSQL before publishing signed artifacts.
 
-## ⛔ Forks and third-party builds
+## License and attribution
 
-> [!CAUTION]
-> **The official mirai lives only here:** the repository `EnsixD/mirai`, the image `ghcr.io/ensixd/mirai` and releases signed with the mirai key. Official addons come only from the `getmikan/marketplace` catalog; the community registry `getmikan/marketplace-community` lists third-party addons that mirai does not review and is not responsible for. Anything else is not mirai, whatever it calls itself.
->
-> **The mirai project considers every fork and every build from other sources potentially unsafe.**
->
-> **Official builds can be checked.** Every release is built automatically from the open code of this repository and signed, and the panel and the installer take updates only with that signature. What someone else's build is made of, only its author knows.
->
-> **A fork does not get our updates.** It cannot sign releases with the mirai key, so fixes of bugs and vulnerabilities do not reach it until its author carries them over, if ever.
->
-> **We do not support forks.** We do not review them and are not responsible for bugs, vulnerabilities or lost data in them. Questions about someone else's build are not handled in the chat or in issues.
->
-> **The name is not part of the license.** GPL v3 covers the code, not the name mirai or its logo (GPL v3 section 7, see [NOTICE.md](NOTICE.md) and [TRADEMARK.md](TRADEMARK.md)). A fork must use another name and must not pass itself off as mirai.
-
-## License
-
-mirai is free software under the [GNU GPL v3](LICENSE) with the additional terms in [NOTICE.md](NOTICE.md): keep the attribution, do not pass a modified version off as the original, no rights to the name and the logo. Copyright (C) 2026 Miroshka and Mirai. It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (GPL-3.0) and adapts parts of [3x-ui](https://github.com/MHSanaei/3x-ui) (GPL-3.0). Fonts: Unbounded, Onest, JetBrains Mono (SIL OFL 1.1).
-
-<div align="center">
-<sub>Made with 🍊</sub>
-</div>
+Mirai is distributed under [GPL-3.0](LICENSE). It is derived from [Mikan](https://github.com/Miroshka000/mikan) and uses [mihomo](https://github.com/MetaCubeX/mihomo). Original copyright notices and license obligations are preserved.
