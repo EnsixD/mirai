@@ -6,6 +6,8 @@
 
 **A self-hosted VPN panel with subscriptions, Telegram and multi-node management.**
 
+Based on [mikan](https://github.com/Miroshka000/mikan) (GPL-3.0); see [NOTICE.md](NOTICE.md).
+
 [![Release](https://img.shields.io/github/v/release/EnsixD/mirai?label=release&color=bf927c)](https://github.com/EnsixD/mirai/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-8caaa0)](LICENSE)
 [![Linux](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-929fc1)](#install)
