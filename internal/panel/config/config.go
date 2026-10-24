@@ -8,6 +8,16 @@ import (
 	"strconv"
 )
 
+const (
+	// DefaultDataDir is where the panel and the node keep their files in the containers;
+	// MIRAI_DATA_DIR moves it. The node binary shares it, which is why it lives in a
+	// package that imports nothing of the panel.
+	DefaultDataDir = "/data"
+	// DefaultNodeSocket is the unix socket the panel reaches its own node by;
+	// MIRAI_NODE_SOCKET moves it.
+	DefaultNodeSocket = "/run/mirai/node.sock"
+)
+
 type Config struct {
 	DataDir    string
 	Listen     string
@@ -20,13 +30,19 @@ type Config struct {
 	AutotuneScale float64
 	// TelegramAPI is the Bot API the bot talks to; a fake one in tests.
 	TelegramAPI string
+	// SupportOff: MIRAI_SUPPORT_ACCESS=off turns support access off for good on this server,
+	// whatever the panel's setting says.
+	SupportOff bool
+	// SupportBotURL is the support bot (MIRAI_SUPPORT_BOT_URL, for tests and development);
+	// "" is the official one.
+	SupportBotURL string
 }
 
 func FromEnv() (Config, error) {
 	c := Config{
-		DataDir:    env("MIRAI_DATA_DIR", "/data"),
+		DataDir:    env("MIRAI_DATA_DIR", DefaultDataDir),
 		Listen:     env("MIRAI_PANEL_LISTEN", "0.0.0.0:2053"),
-		NodeSocket: env("MIRAI_NODE_SOCKET", "/run/mirai/node.sock"),
+		NodeSocket: env("MIRAI_NODE_SOCKET", DefaultNodeSocket),
 	}
 	if err := c.LogLevel.UnmarshalText([]byte(env("MIRAI_LOG_LEVEL", "info"))); err != nil {
 		return c, fmt.Errorf("MIRAI_LOG_LEVEL: %w", err)
@@ -42,6 +58,14 @@ func FromEnv() (Config, error) {
 		return c, fmt.Errorf("MIRAI_PANEL_LISTEN: %w", err)
 	}
 	c.TelegramAPI = os.Getenv("MIRAI_TG_API")
+	c.SupportBotURL = os.Getenv("MIRAI_SUPPORT_BOT_URL")
+	switch v := os.Getenv("MIRAI_SUPPORT_ACCESS"); v {
+	case "", "on":
+	case "off":
+		c.SupportOff = true
+	default:
+		return c, fmt.Errorf("MIRAI_SUPPORT_ACCESS: want on or off, got %q", v)
+	}
 	c.AutotuneScale = 1
 	if v := os.Getenv("MIRAI_AUTOTUNE_SCALE"); v != "" {
 		if c.AutotuneScale, err = strconv.ParseFloat(v, 64); err != nil || c.AutotuneScale <= 0 || c.AutotuneScale > 1 {

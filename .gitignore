@@ -28,11 +28,4 @@ Thumbs.db
 
 # release artifacts
 /release/
-
-# native local development runtime
-/.local/
-
-# compiler cache
-*.tsbuildinfo
-__pycache__/
-*.pyc
+.github/assets/avatar-concepts/

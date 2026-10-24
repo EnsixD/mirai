@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,9 +10,14 @@ import (
 	"mirai/internal/panel/store/storetest"
 )
 
-// Empty catalogs remain empty across repeated starts, regardless of language.
-func TestSeedLeavesCatalogEmpty(t *testing.T) {
-	for _, lang := range []string{"", "ru", "en"} {
+// The installer bootstraps the panel with its language before the first start, so the
+// tariffs are named in it; panels set up without one keep the Russian names.
+func TestSeedNamesTariffsInDefaultLang(t *testing.T) {
+	for lang, want := range map[string][]string{
+		"":   {"Пробный", "Стандарт", "Безлимит"},
+		"ru": {"Пробный", "Стандарт", "Безлимит"},
+		"en": {"Trial", "Standard", "Unlimited"},
+	} {
 		ctx := context.Background()
 		st, err := storetest.Open(ctx, t.TempDir())
 		if err != nil {
@@ -25,27 +31,16 @@ func TestSeedLeavesCatalogEmpty(t *testing.T) {
 		if err := Seed(ctx, st, time.Now()); err != nil {
 			t.Fatal(err)
 		}
-		for i := 0; i < 2; i++ {
-			inbounds, err := st.Q.ListInbounds(ctx)
-			if err != nil || len(inbounds) != 0 {
-				t.Fatalf("fresh install must have no inbounds: %d %v", len(inbounds), err)
-			}
-			if err := Seed(ctx, st, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-		}
 		tariffs, err := st.Q.ListTariffs(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(tariffs) != 0 {
-			t.Fatalf("seed created %d tariffs", len(tariffs))
+		var got []string
+		for _, tr := range tariffs {
+			got = append(got, tr.Name)
 		}
-		for _, table := range []string{"users", "tg_chats", "payments", "bound_devices", "trials", "tg_account_controls"} {
-			var count int
-			if err := st.DB.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil || count != 0 {
-				t.Fatalf("fresh installation contains customer data in %s: %d %v", table, count, err)
-			}
+		if !slices.Equal(got, want) {
+			t.Errorf("lang %q: tariffs %v, want %v", lang, got, want)
 		}
 		st.Close()
 	}

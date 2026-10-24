@@ -1,6 +1,5 @@
-import { Select } from "./select";
 // The TLS fingerprint picker: the profiles every app knows, or an own one typed in.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { FINGERPRINTS, fingerprintLabel, isKnownFingerprint, validFingerprint } from "../lib/fingerprints";
 
@@ -37,13 +36,18 @@ export function FingerprintSelect({
   const bad = ownMode && !validFingerprint(value);
   // The picker leaving the screen (another tab of the form) must not leave its verdict
   // behind: a field that is not shown cannot block saving.
+  // The parent may hand a new callback on every render: the verdict follows bad alone.
+  const tell = useRef(onValid);
   useEffect(() => {
-    onValid?.(!bad);
-    return () => onValid?.(true);
+    tell.current = onValid;
+  });
+  useEffect(() => {
+    tell.current?.(!bad);
+    return () => tell.current?.(true);
   }, [bad]);
   return (
     <div>
-      <Select
+      <select
         id={id}
         className="input max-w-[320px]"
         value={ownMode ? OWN : value}
@@ -66,7 +70,7 @@ export function FingerprintSelect({
           </option>
         ))}
         <option value={OWN}>{t("settings.fpOwn")}</option>
-      </Select>
+      </select>
       {ownMode ? (
         <div className="mt-2">
           <input

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -56,6 +57,17 @@ func NewTLSClient(address string, cfg *tls.Config) *Client {
 
 var ErrUnavailable = errors.New("node unavailable")
 
+// StatusError is a node's failure answer without an Error body, such as the 404 of a node
+// that predates an endpoint.
+type StatusError struct {
+	Method, Path string
+	Status       int
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("node %s %s: status %d", e.Method, e.Path, e.Status)
+}
+
 func (c *Client) do(ctx context.Context, method, path string, in, out any, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -76,7 +88,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -84,7 +96,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, timeo
 		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e) == nil && e.Code != "" {
 			return &e
 		}
-		return fmt.Errorf("node %s %s: status %d", method, path, resp.StatusCode)
+		return &StatusError{Method: method, Path: path, Status: resp.StatusCode}
 	}
 	if out != nil {
 		return json.NewDecoder(&cappedReader{r: resp.Body, left: MaxResponse}).Decode(out)
@@ -148,17 +160,52 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return r, err
 }
 
-func (c *Client) Activity(ctx context.Context) (Activity, error) {
-	var r Activity
-	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)
+// RequestUpdate asks the node to update to a release; the updater on its server takes
+// the request. Nodes before 0.5.0.2 answer 404.
+func (c *Client) RequestUpdate(ctx context.Context, version string) error {
+	return c.do(ctx, http.MethodPost, "/v1/update", UpdateRequest{Version: version}, nil, 10*time.Second)
+}
+
+// PresentChallenge has the node answer an ACME HTTP-01 challenge on its port 80 until
+// CleanUpChallenge. Nodes that predate it answer 404 (a *StatusError); a port 80 held by
+// another program is *Error{Code: CodePort80Busy}, its Message the holder when known.
+func (c *Client) PresentChallenge(ctx context.Context, token, keyAuth string) error {
+	return c.do(ctx, http.MethodPut, "/v1/acme/challenge/"+url.PathEscape(token), ChallengeRequest{KeyAuth: keyAuth}, nil, 15*time.Second)
+}
+
+// CleanUpChallenge stops answering token; the node gives port 80 back once none is left.
+func (c *Client) CleanUpChallenge(ctx context.Context, token string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/acme/challenge/"+url.PathEscape(token), nil, nil, 15*time.Second)
+}
+
+// Torrents returns the torrent blocker's hits after seq of epoch. Nodes that predate the
+// blocker answer 404.
+func (c *Client) Torrents(ctx context.Context, epoch string, after int64) (TorrentHits, error) {
+	var r TorrentHits
+	q := url.Values{"epoch": {epoch}, "after": {strconv.FormatInt(after, 10)}}
+	err := c.do(ctx, http.MethodGet, "/v1/torrents?"+q.Encode(), nil, &r, 10*time.Second)
 	return r, err
 }
 
-// Connections reads the connection log of the slots. A node older than the log answers
-// 404, which comes back as an error like any other.
-func (c *Client) Connections(ctx context.Context, slots []string) (Connections, error) {
-	var r Connections
-	err := c.do(ctx, http.MethodPost, "/v1/connections", ConnectionsRequest{Slots: slots}, &r, 10*time.Second)
+// SpeedTest runs the node's speed test, about twenty seconds. Nodes that predate it
+// answer 404 (a *StatusError); one running a test answers 409 speed_test_busy.
+func (c *Client) SpeedTest(ctx context.Context) (SpeedTest, error) {
+	var r SpeedTest
+	err := c.do(ctx, http.MethodPost, "/v1/speedtest", nil, &r, 90*time.Second)
+	return r, err
+}
+
+// ServiceRegions asks the sites from the node, about ten seconds. Nodes that predate it
+// answer 404 (a *StatusError); one already asking answers 409 regions_busy.
+func (c *Client) ServiceRegions(ctx context.Context) (ServiceRegions, error) {
+	var r ServiceRegions
+	err := c.do(ctx, http.MethodPost, "/v1/regions", nil, &r, 45*time.Second)
+	return r, err
+}
+
+func (c *Client) Activity(ctx context.Context) (Activity, error) {
+	var r Activity
+	err := c.do(ctx, http.MethodGet, "/v1/activity", nil, &r, 10*time.Second)
 	return r, err
 }
 
@@ -171,14 +218,24 @@ func (c *Client) CheckTarget(ctx context.Context, req TargetCheckRequest) (Targe
 // ScanTargets opens ~250 connections on the node; it runs one scan at a time.
 func (c *Client) ScanTargets(ctx context.Context, req TargetScanRequest) (TargetScan, error) {
 	var r TargetScan
-	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, 45*time.Second)
+	wait := ScanTime + 15*time.Second
+	if req.Wide {
+		wait = WideScanTime + 15*time.Second
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/targets/scan", req, &r, wait)
 	return r, err
 }
 
-// Warp checks the node's way out through WARP (a request to Cloudflare through it).
-func (c *Client) Warp(ctx context.Context) (WarpStatus, error) {
+// Warp checks the node's way out through WARP (a request to Cloudflare through it). The
+// node answers from a minute-old check unless force asks for a new one; it may still
+// answer from the cache when forced too often, and old nodes ignore force.
+func (c *Client) Warp(ctx context.Context, force bool) (WarpStatus, error) {
 	var r WarpStatus
-	err := c.do(ctx, http.MethodGet, "/v1/warp", nil, &r, 20*time.Second)
+	path := "/v1/warp"
+	if force {
+		path += "?force=1"
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &r, 20*time.Second)
 	return r, err
 }
 
@@ -195,33 +252,49 @@ var TunnelHosts = []string{"api.telegram.org:443"}
 
 // Tunnel opens a TCP stream to addr through the node (HTTP CONNECT on the Node API).
 func (c *Client) Tunnel(ctx context.Context, addr string) (net.Conn, error) {
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	return c.upgrade(ctx, req, http.StatusOK, 15*time.Second)
+}
+
+// upgrade sends req on a bare connection to the Node API and, when the node answers with the
+// status want, hands the connection over to the caller: from then on it is a stream (a CONNECT
+// tunnel, an Upgrade). wait bounds the answer when ctx has no deadline. Any other answer is the
+// node's *Error, or a *StatusError of the node that predates the path.
+func (c *Client) upgrade(ctx context.Context, req *http.Request, want int, wait time.Duration) (net.Conn, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if d, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(d)
 	} else {
-		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+		_ = conn.SetDeadline(time.Now().Add(wait))
 	}
-	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Host: addr}, Host: addr, Header: http.Header{}}
+	// Cancelling ctx while the node answers closes the connection: the read below ends.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
 	if err := req.Write(conn); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != want {
 		defer conn.Close()
 		var e Error
 		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&e) == nil && e.Code != "" {
 			return nil, &e
 		}
-		return nil, fmt.Errorf("node tunnel: status %d", resp.StatusCode)
+		return nil, &StatusError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode}
+	}
+	// A caller that gave up while the node answered gets no stream.
+	if !stop() {
+		conn.Close()
+		return nil, ctx.Err()
 	}
 	_ = conn.SetDeadline(time.Time{})
 	if br.Buffered() > 0 {
@@ -237,3 +310,11 @@ type bufConn struct {
 }
 
 func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// Diagnose asks the node how its server is: DNS, the internet, GitHub and GHCR for
+// updates, its clock, disk and memory. Nodes that predate it answer 404 (a *StatusError).
+func (c *Client) Diagnose(ctx context.Context) (Diagnosis, error) {
+	var r Diagnosis
+	err := c.do(ctx, http.MethodPost, "/v1/diagnose", nil, &r, 25*time.Second)
+	return r, err
+}

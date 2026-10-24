@@ -4,7 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,6 +192,36 @@ func TestValidateDiscountUsesInvoiceRules(t *testing.T) {
 	p.Value, p.MaxDiscount = 100, 0
 	if err := validateDiscount(p, 7, math.MaxInt64, "RUB"); !errors.Is(err, ErrMinimum) {
 		t.Fatalf("full-value discount accepted: %v", err)
+	}
+}
+
+// The Mini App's one "Apply" takes a discount code before any order is picked: Check lets
+// it through for the checkout, and still refuses what the account may not use.
+func TestCheckTakesADiscountWithoutAnOrder(t *testing.T) {
+	st := newTestStore(t)
+	defer st.Close()
+	ctx := context.Background()
+	p, err := st.Q.CreatePromoCode(ctx, db.CreatePromoCodeParams{Code: "WELCOME15", Type: "percent", Value: 15, Currency: "RUB", MinOrder: 100, MaxDiscount: 500000,
+		PerUserLimit: 1, FirstPurchaseOnly: 1, TariffIds: "[]", Enabled: 1, CreatedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(st, func() time.Time { return time.Unix(1000, 0) })
+	if _, err := s.Validate(ctx, 77, 0, 0, 0, "", "welcome15"); !errors.Is(err, ErrMinimum) {
+		t.Fatalf("Validate without an order: %v, want ErrMinimum", err)
+	}
+	got, err := s.Check(ctx, 77, 0, " welcome15 ")
+	if err != nil || got.ID != p.ID {
+		t.Fatalf("Check = %+v, %v", got, err)
+	}
+	if _, err := s.Check(ctx, 77, 0, "NOPE"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown code: %v", err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO payments(provider,payload,tg_id,kind,tariff_name,amount,currency,status,created_at) VALUES('stars','p1',77,'package','T',100,'XTR','applied',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Check(ctx, 77, 0, "WELCOME15"); !errors.Is(err, ErrFirstPurchase) {
+		t.Fatalf("after a purchase: %v, want ErrFirstPurchase", err)
 	}
 }
 
@@ -423,3 +459,68 @@ func TestRedeemBonusRejectsDisabledUser(t *testing.T) {
 }
 
 const domainGiBForTest = int64(1) << 30
+
+// Every sentinel of the package must be a refusal: subs answers a refused code with the generic
+// "promo_unavailable", and an Err* left out of IsRefusal would be answered as the panel's fault.
+// The list below is checked against the source, so a new Err* that is not added here fails.
+func TestIsRefusalCoversEveryError(t *testing.T) {
+	all := map[string]error{
+		"ErrNotFound": ErrNotFound, "ErrInactive": ErrInactive, "ErrExpired": ErrExpired, "ErrLimit": ErrLimit,
+		"ErrUserLimit": ErrUserLimit, "ErrTariff": ErrTariff, "ErrMinimum": ErrMinimum, "ErrNewUser": ErrNewUser,
+		"ErrFirstPurchase": ErrFirstPurchase, "ErrCurrency": ErrCurrency, "ErrAlreadyApplied": ErrAlreadyApplied,
+		"ErrSubscription": ErrSubscription, "ErrNoExpiry": ErrNoExpiry, "ErrNotDiscount": ErrNotDiscount,
+		"ErrUnavailable": ErrUnavailable, "ErrInvalidValue": ErrInvalidValue, "ErrReservationExpired": ErrReservationExpired,
+		"ErrRefundUnsupported": ErrRefundUnsupported, "ErrNotBonus": ErrNotBonus,
+	}
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := 0
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, entry.Name(), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				for _, name := range spec.(*ast.ValueSpec).Names {
+					if !strings.HasPrefix(name.Name, "Err") || !name.IsExported() {
+						continue
+					}
+					declared++
+					if _, ok := all[name.Name]; !ok {
+						t.Errorf("%s is declared in the package but not listed in this test", name.Name)
+					}
+				}
+			}
+		}
+	}
+	if declared != len(all) {
+		t.Errorf("the package declares %d Err* variables, the test lists %d", declared, len(all))
+	}
+	for name, err := range all {
+		if !IsRefusal(err) {
+			t.Errorf("%s is not a refusal", name)
+		}
+		if !IsRefusal(fmt.Errorf("redeem: %w", err)) {
+			t.Errorf("%s is not a refusal once wrapped", name)
+		}
+		if !strings.HasPrefix(err.Error(), "promo_") {
+			t.Errorf("%s says %q, want the promo_ code", name, err.Error())
+		}
+	}
+	for _, err := range []error{nil, errors.New("promo_unavailable"), sql.ErrNoRows, fmt.Errorf("database is down: %w", errors.New("x"))} {
+		if IsRefusal(err) {
+			t.Errorf("%v is not one of the package's refusals", err)
+		}
+	}
+}

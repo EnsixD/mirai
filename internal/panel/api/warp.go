@@ -16,29 +16,40 @@ import (
 	"mirai/internal/panel/domain"
 	"mirai/internal/panel/store/db"
 	"mirai/internal/panel/warp"
+	"mirai/internal/textutil"
 )
 
 type WarpView struct {
-	Configured bool     `json:"configured"`
-	Enabled    bool     `json:"enabled"`
-	Source     string   `json:"source,omitempty" enum:"register,import,"`
-	Plus       bool     `json:"plus" doc:"Аккаунт WARP+"`
-	Endpoint   string   `json:"endpoint,omitempty"`
-	IPv4       string   `json:"ipv4,omitempty"`
-	IPv6       string   `json:"ipv6,omitempty"`
-	Routes     []string `json:"routes" doc:"Домены и сети, которые идут через WARP у всех подключений ноды"`
-	Inbounds   []string `json:"inbounds" doc:"Подключения ноды, у которых весь трафик идёт через WARP"`
-	Status     *struct {
-		OK        bool      `json:"ok"`
-		IP        string    `json:"ip,omitempty" doc:"Адрес, который видят сайты"`
-		Warp      string    `json:"warp,omitempty" doc:"on | plus | off — как отвечает Cloudflare"`
-		Colo      string    `json:"colo,omitempty"`
-		Error     string    `json:"error,omitempty"`
-		CheckedAt time.Time `json:"checked_at"`
-	} `json:"status,omitempty" doc:"Последняя проверка выхода через WARP с ноды; нет — нода недоступна"`
+	Configured bool       `json:"configured"`
+	Enabled    bool       `json:"enabled"`
+	Source     string     `json:"source,omitempty" enum:"register,import,"`
+	Plus       bool       `json:"plus" doc:"Аккаунт WARP+"`
+	Endpoint   string     `json:"endpoint,omitempty"`
+	IPv4       string     `json:"ipv4,omitempty"`
+	IPv6       string     `json:"ipv6,omitempty"`
+	Routes     []string   `json:"routes" doc:"Домены и сети, которые идут через WARP у всех подключений ноды"`
+	Inbounds   []string   `json:"inbounds" doc:"Подключения ноды, у которых весь трафик идёт через WARP"`
+	NoReserved bool       `json:"no_reserved,omitempty" doc:"Свой конфиг без Reserved: на части endpoint'ов Cloudflare молча не отвечает на handshake"`
+	Status     *WarpCheck `json:"status,omitempty" doc:"Последняя проверка выхода через WARP с ноды; нет — у ноды ещё нет настроенного WARP"`
+}
+
+// WarpCheck is one look at the internet through WARP.
+type WarpCheck struct {
+	OK        bool      `json:"ok"`
+	IP        string    `json:"ip,omitempty" doc:"Адрес, который видят сайты"`
+	Warp      string    `json:"warp,omitempty" doc:"on | plus | off — как отвечает Cloudflare"`
+	Colo      string    `json:"colo,omitempty"`
+	Error     string    `json:"error,omitempty" doc:"Причина: timeout | dns | tls | refused | not_loaded | bad_answer | https_timeout | failed; node_unreachable — нода не ответила панели; unreachable — старая нода"`
+	Detail    string    `json:"detail,omitempty" doc:"Причина словами, без секретов; на английском"`
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 type warpOutput struct{ Body WarpView }
+
+type warpGetInput struct {
+	ID    int64 `path:"id" minimum:"1"`
+	Force bool  `query:"force" doc:"Проверить заново, не беря ответ ноды из кеша (не чаще раза в 5 секунд)"`
+}
 
 type warpRegisterInput struct {
 	ID   int64 `path:"id" minimum:"1"`
@@ -116,7 +127,9 @@ func (h *handlers) warpUnused(ctx context.Context, nodeID int64) error {
 	return nil
 }
 
-func (h *handlers) warpView(ctx context.Context, nodeID int64, check bool) (WarpView, error) {
+// warpView is the node's WARP as the drawer shows it. check asks the node for the state of
+// the tunnel; force makes it look again instead of answering from its minute-old check.
+func (h *handlers) warpView(ctx context.Context, nodeID int64, check, force bool) (WarpView, error) {
 	v := WarpView{Routes: []string{}, Inbounds: []string{}}
 	w, err := h.d.Store.Q.GetNodeWarp(ctx, nodeID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -127,30 +140,30 @@ func (h *handlers) warpView(ctx context.Context, nodeID int64, check bool) (Warp
 	}
 	v.Configured, v.Enabled, v.Source, v.Plus = true, w.Enabled != 0, w.Source, w.Plus != 0
 	v.Endpoint, v.IPv4, v.IPv6 = w.Endpoint, w.Ipv4, w.Ipv6
+	v.NoReserved = w.Source == "import" && w.Reserved == ""
 	_ = json.Unmarshal([]byte(w.Routes), &v.Routes)
 	if v.Inbounds, err = h.warpUsers(ctx, nodeID); err != nil {
 		return v, err
 	}
 	if check && v.Enabled && h.d.Nodes != nil {
-		if s, err := h.d.Nodes.Warp(ctx, nodeID); err == nil && s.Configured {
-			v.Status = &struct {
-				OK        bool      `json:"ok"`
-				IP        string    `json:"ip,omitempty" doc:"Адрес, который видят сайты"`
-				Warp      string    `json:"warp,omitempty" doc:"on | plus | off — как отвечает Cloudflare"`
-				Colo      string    `json:"colo,omitempty"`
-				Error     string    `json:"error,omitempty"`
-				CheckedAt time.Time `json:"checked_at"`
-			}{s.OK, s.IP, s.Warp, s.Colo, s.Error, s.CheckedAt}
+		s, err := h.d.Nodes.Warp(ctx, nodeID, force)
+		switch {
+		case err != nil:
+			// Not "no status": the admin must see that the node did not answer, and why.
+			h.d.Log.Warn("warp: the node did not answer a check", "node", nodeID, "err", err)
+			v.Status = &WarpCheck{Error: "node_unreachable", Detail: textutil.Clip(err.Error(), 200), CheckedAt: h.d.Now().UTC()}
+		case s.Configured:
+			v.Status = &WarpCheck{s.OK, s.IP, s.Warp, s.Colo, s.Error, s.Detail, s.CheckedAt}
 		}
 	}
 	return v, nil
 }
 
-func (h *handlers) getWarp(ctx context.Context, in *nodeIDInput) (*warpOutput, error) {
+func (h *handlers) getWarp(ctx context.Context, in *warpGetInput) (*warpOutput, error) {
 	if _, err := h.getNode(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	v, err := h.warpView(ctx, in.ID, true)
+	v, err := h.warpView(ctx, in.ID, true, in.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +189,7 @@ func (h *handlers) saveWarp(ctx context.Context, nodeID int64, source string, a 
 	}
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.warp."+source, "node", strconv.FormatInt(nodeID, 10), map[string]any{"plus": a.Plus})
-	v, err := h.warpView(ctx, nodeID, false)
+	v, err := h.warpView(ctx, nodeID, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -230,10 +243,10 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	if b.Routes != nil {
 		rs, bad := warp.ParseRoutes(*b.Routes)
 		if len(bad) > 0 {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.routes", Message: "warp_bad_route", Value: bad[0]})
+			return nil, fieldErrValue("body.routes", "warp_bad_route", bad[0])
 		}
 		if err := rs.Check(); err != nil {
-			return nil, huma.Error422UnprocessableEntity("validation", &huma.ErrorDetail{Location: "body.routes", Message: err.Error()})
+			return nil, fieldErr("body.routes", err.Error())
 		}
 		raw, _ := json.Marshal(rs.All())
 		routes = string(raw)
@@ -241,7 +254,7 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	if b.License != nil {
 		plus, err := h.d.Warp.SetLicense(ctx, w.AccountID, w.AccountToken, strings.TrimSpace(*b.License))
 		if err != nil {
-			return nil, huma.Error422UnprocessableEntity("validation", warpDetail("body.license", err))
+			return nil, fieldErrs(warpDetail("body.license", err))
 		}
 		if err := h.d.Store.Q.SetNodeWarpPlus(ctx, db.SetNodeWarpPlusParams{Plus: domain.Flag(plus), UpdatedAt: h.d.Now().Unix(), NodeID: in.ID}); err != nil {
 			return nil, err
@@ -252,7 +265,7 @@ func (h *handlers) patchWarp(ctx context.Context, in *warpPatchInput) (*warpOutp
 	}
 	h.d.Changes.SlotsChanged()
 	h.audit(ctx, sessionOf(ctx).AdminID, "node.warp.update", "node", strconv.FormatInt(in.ID, 10), map[string]any{"enabled": enabled != 0, "routes_changed": b.Routes != nil})
-	v, err := h.warpView(ctx, in.ID, false)
+	v, err := h.warpView(ctx, in.ID, false, false)
 	if err != nil {
 		return nil, err
 	}

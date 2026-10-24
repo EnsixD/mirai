@@ -1,4 +1,3 @@
-import { Select } from "../../components/select";
 // Cascades: client → this node → another node → internet. Inbounds pick their exit in
 // their own settings; here a node shows where it sends traffic, who comes through it, and
 // where the traffic other nodes relay through it goes next.
@@ -14,7 +13,7 @@ import { t } from "../../i18n";
 import { useDraft } from "../../lib/draft";
 import { fieldErrors } from "../../lib/fields";
 import { ago } from "../../lib/format";
-import { nodeLabel } from "./nodes";
+import { nodeLabel } from "../../lib/node-label";
 
 type Cascade = Schemas["CascadeView"];
 type Route = "direct" | "warp" | "node";
@@ -26,7 +25,7 @@ export function CascadeDrawer({ node, onClose }: { node: { id: number; name: str
     enabled: !!node,
   });
   return (
-    <Drawer presentation="modal" open={!!node} onOpenChange={(v) => !v && onClose()} title={t("cascade.title")} meta={node?.name}>
+    <Drawer open={!!node} onOpenChange={(v) => !v && onClose()} title={t("cascade.title")} meta={node?.name}>
       <div className="pt-5">
         <p className="mb-4 text-[13px] text-[var(--ink-600)]">{t("cascade.intro")}</p>
         <QueryBoundary query={cascade} pending={<Skeleton style={{ height: 240, borderRadius: 16 }} />}>
@@ -111,7 +110,8 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
             ? t("cascade.sources", { list: c.relay.sources.map((s) => s.name || name(s.node_id)).join(", "), port: c.relay.port })
             : t("cascade.sourcesNone")}
         </p>
-        {save.error && !Object.keys(fields).length ? <div className="banner err mb-4">{errorText(save.error)}</div> : null}
+        {c.relay ? <RelayListener relay={c.relay} /> : null}
+        {save.error && !Object.keys(fields).length ? <div className="banner err mb-4" role="alert">{errorText(save.error)}</div> : null}
         <Field label={t("cascade.route")} hint={t(`cascade.routeHint.${route}`)} error={fields.exit_node_id}>
           <Segmented
             label={t("cascade.route")}
@@ -124,7 +124,7 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
             ]}
           />
           {route === "node" ? (
-            <Select className="input mt-2 max-w-[320px]" value={exit} onChange={(e) => setExit(Number(e.target.value))} aria-label={t("inbounds.exitNode")}>
+            <select className="input mt-2 max-w-[320px]" value={exit} onChange={(e) => setExit(Number(e.target.value))} aria-label={t("inbounds.exitNode")}>
               <option value={0} disabled>
                 {t("inbounds.exitPick")}
               </option>
@@ -135,13 +135,35 @@ function Body({ nodeId, c, refetch, checking }: { nodeId: number; c: Cascade; re
                     {nodeLabel(n)}
                   </option>
                 ))}
-            </Select>
+            </select>
           ) : null}
         </Field>
-        <Button variant="primary" loading={save.isPending} disabled={!changed || (route === "node" && !exit)} onClick={() => save.mutate()}>
-          {t("common.save")}
-        </Button>
+        <div className="form-actions">
+          <Button variant="primary" loading={save.isPending} disabled={!changed || (route === "node" && !exit)} onClick={() => save.mutate()}>
+            {t("common.save")}
+          </Button>
+        </div>
       </section>
     </>
+  );
+}
+
+// The relay's listener on the node. A port another program holds keeps it from starting,
+// and the nodes that leave through it then reach that program instead.
+function RelayListener({ relay }: { relay: NonNullable<Cascade["relay"]> }) {
+  const state = relay.listener;
+  if (state === "unknown") return null;
+  return (
+    <div className="mb-3">
+      <Pill tone={state === "ok" ? "ok" : "bad"}>{t(`cascade.listener.${state}`, { port: relay.port })}</Pill>
+      {state === "ok" ? null : (
+        <div className="banner err mt-2" role="alert">
+          <div>
+            {t(state === "busy" ? "cascade.listener.busyText" : "cascade.listener.failedText", { port: relay.port })}
+            {relay.error ? <div className="mt-1 break-all font-mono text-xs opacity-80">{relay.error}</div> : null}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

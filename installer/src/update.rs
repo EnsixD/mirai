@@ -14,22 +14,31 @@
 //!                       words count; anything else is stable)
 //!   update/request      the panel: its Update button (a path unit starts `update --requested`)
 //!   update/status.json  this: {"state": "running" | "ok" | "failed", "version", "from", "error", "at"}
+//!
+//! A node talks the same way through data/node/update, which its container owns, with
+//! one difference: there is no policy (its .env says), and the request names the release,
+//! {"version": "X"}, which the panel asked its node API for. The panel's own version is
+//! what it asks, but the node's container is not trusted any more than the panel's: the
+//! version is only a name, and the node goes to the signed release of that version in the
+//! release index of its channel, never to an image or an address from the request. It
+//! never goes back, and never past the version asked for (hop by hop, when that release
+//! cannot be reached at once). The daily timer on a node does nothing unless its root-owned
+//! .env says MIRAI_AUTO_UPDATE=1: nodes follow their panel.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
-use crate::envfile::EnvFile;
+use crate::config::Config;
 use crate::lock::{self, Wait};
 use crate::ops::Install;
 use crate::panelfs::{self, Dir};
 use crate::release::Channel;
-use crate::{DIR, addon, backup, clock, docker, host, net, release, setup, signals};
+use crate::{DIR, addon, backup, clock, docker, host, net, release, setup, signals, terminal};
 
 /// What `mirai update` was asked for.
 #[derive(clap::Args, Clone, Debug, Default)]
@@ -47,11 +56,15 @@ pub struct UpdateArgs {
     pub check: bool,
 }
 
-const UPDATE_REL: &str = "data/panel/update";
+/// The directory the panel's container, or a node's, owns for this (below /opt/mirai).
+fn update_rel(node: bool) -> &'static str {
+    if node { "data/node/update" } else { "data/panel/update" }
+}
 
-/// Where the panel and the host updater talk; the panel sees it as /data/panel/update.
-fn update_dir(create: bool) -> Result<Option<Dir>> {
-    Dir::open(Path::new(DIR), UPDATE_REL, create)
+/// Where the panel and the host updater talk; the panel sees it as /data/panel/update. A
+/// node's is /data/node/update.
+fn update_dir(node: bool, create: bool) -> Result<Option<Dir>> {
+    Dir::open(Path::new(DIR), update_rel(node), create)
 }
 
 /// How the update stands, as the panel shows it.
@@ -63,30 +76,30 @@ enum Phase {
     Failed,
 }
 
-/// Tells the panel how the update went (a node has no panel on the host to tell).
+/// Tells the panel how the update went; a node's panel reads it through the node API.
 fn report(install: &Install, phase: Phase, version: &str, from: &str, error: &str) {
-    if install.node {
-        return;
-    }
     let body = serde_json::json!({"state": phase, "version": version, "from": from, "error": error, "at": clock::rfc3339()});
-    let sent = update_dir(true)
-        .and_then(|d| d.context("data/panel/update is not there")?.write("status.json", body.to_string().as_bytes(), 0o644));
+    let sent = update_dir(install.node, true).and_then(|d| {
+        d.with_context(|| format!("{} is not there", update_rel(install.node)))?.write("status.json", body.to_string().as_bytes(), 0o644)
+    });
     if let Err(e) = sent {
         eprintln!("mirai: cannot tell the panel how the update went: {e:#}");
     }
 }
 
-/// Whether the daily check may update: a node asks its .env, a panel its policy file.
+/// Whether the daily check may update: a node asks its .env, and only an explicit
+/// MIRAI_AUTO_UPDATE=1 there lets it move ahead of its panel (it follows the panel
+/// otherwise); a panel asks its policy file.
 fn auto_on(install: &Install) -> bool {
     if install.node {
-        return install.env.get("MIRAI_AUTO_UPDATE") == Some("1");
+        return install.config.get("MIRAI_AUTO_UPDATE") == Some("1");
     }
     policy_on()
 }
 
 /// Whether the panel's settings turned automatic updates on, for the menu.
 pub fn policy_on() -> bool {
-    update_dir(false).ok().flatten().and_then(|d| d.read("policy.json", 4096).ok().flatten()).is_some_and(|b| policy_says_on(&b))
+    update_dir(false, false).ok().flatten().and_then(|d| d.read("policy.json", 4096).ok().flatten()).is_some_and(|b| policy_says_on(&b))
 }
 
 fn policy_says_on(data: &[u8]) -> bool {
@@ -99,9 +112,9 @@ fn policy_says_on(data: &[u8]) -> bool {
 /// two exact words: anything else there, or no file, is stable.
 pub fn channel(install: &Install) -> Channel {
     if install.node {
-        return install.env.get("MIRAI_UPDATE_CHANNEL").and_then(Channel::parse).unwrap_or(Channel::Stable);
+        return install.config.get("MIRAI_UPDATE_CHANNEL").and_then(Channel::parse).unwrap_or(Channel::Stable);
     }
-    update_dir(false)
+    update_dir(false, false)
         .ok()
         .flatten()
         .and_then(|d| d.read("policy.json", 4096).ok().flatten())
@@ -126,6 +139,17 @@ const MAX_HOPS: u32 = 5;
 /// Which hop of an update this command is (0 for the first): set by the update that
 /// started it.
 const HOP_ENV: &str = "MIRAI_UPDATE_HOP";
+
+/// The release a hop chain asked for by the panel ends at: set by the update that started
+/// it, so that no hop goes past it. A name, nothing else: the release is looked up in the
+/// signed index again by each hop.
+const UPTO_ENV: &str = "MIRAI_UPDATE_UPTO";
+
+/// What this command was asked to stop at: the release the node's panel asked for, or the
+/// one the hop that started this command was going to. Only a valid version counts.
+fn upto_from_env() -> Option<String> {
+    std::env::var(UPTO_ENV).ok().filter(|v| release::valid_version(v))
+}
 
 /// What comes after a hop to a release that is not the newest one.
 #[derive(Debug, PartialEq, Eq)]
@@ -159,7 +183,12 @@ fn next_hop(newest: Option<&str>, daily: bool, at: &mut Attempt, say: &mut dyn F
     let hop = match after_hop(newest, hop_number()) {
         After::Done => return Ok(()),
         After::Stop => {
-            say(&format!("mirai {} is out still: run mirai update again to go on.", newest.unwrap_or_default()));
+            let more = format!("mirai {} is out still: run mirai update again to go on.", newest.unwrap_or_default());
+            say(&more);
+            // The panel waits for the release it asked for: this is not the end it expects.
+            if at.upto.is_some() {
+                at.skipped = Some(more);
+            }
             return Ok(());
         }
         After::Next(n) => n,
@@ -167,6 +196,9 @@ fn next_hop(newest: Option<&str>, daily: bool, at: &mut Attempt, say: &mut dyn F
     say(&format!("mirai {} runs; going on towards mirai {}.", at.version, newest.unwrap_or_default()));
     let mut child = Command::new(host::BIN);
     child.arg("update").env(lock::HELD_ENV, "1").env(HOP_ENV, hop.to_string());
+    if let Some(upto) = &at.upto {
+        child.env(UPTO_ENV, upto);
+    }
     if daily {
         child.arg("--auto");
     }
@@ -177,52 +209,79 @@ fn next_hop(newest: Option<&str>, daily: bool, at: &mut Attempt, say: &mut dyn F
     Ok(())
 }
 
-/// What the panel put at update/request.
+/// What the panel, or a node's container, put at update/request.
 #[derive(Debug, PartialEq, Eq)]
 enum Asked {
     Nothing,
+    /// The panel's Update button: the newest release.
     Update,
+    /// This release and no further: the one a node's panel asked for, or the one the panel's
+    /// own page showed when its Update button was pressed.
+    Version(String),
     /// The adapters ({"do": "addons"}), not an update.
     Addons,
-    /// Not a request: a link, a directory, a FIFO, a file of a size the panel never writes.
+    /// Not a request: a link, a directory, a FIFO, a file of a size nobody writes, or
+    /// (for a node) one that does not name a release version.
     Garbage(String),
 }
 
+/// The largest request: what the panel writes is a dozen bytes, a node's a few dozen.
+const REQUEST_LIMIT: u64 = 4096;
+
 /// Takes the request: whatever it is, it goes first, so the unit that watches for it does
-/// not fire again and again.
-fn take_request(dir: &Dir) -> Result<Asked> {
+/// not fire again and again. node says whose request it is: a node's must name a release,
+/// {"version": "X"}, the only thing taken from it, and is nothing else; the panel's is any
+/// small file except the adapters' {"do": "addons"}, and the release it names, when it names
+/// a valid one, is the one its page showed.
+fn take_request(dir: &Dir, node: bool) -> Result<Asked> {
     if !dir.exists("request") {
         return Ok(Asked::Nothing);
     }
-    let read = dir.read("request", 4096);
+    let read = dir.read("request", REQUEST_LIMIT);
     dir.discard("request")?;
     Ok(match read {
+        Ok(Some(data)) if node => match requested_version(&data) {
+            Ok(v) => Asked::Version(v),
+            Err(why) => Asked::Garbage(why),
+        },
         Ok(Some(data)) => match serde_json::from_slice::<serde_json::Value>(&data) {
             Ok(v) if v["do"] == "addons" => Asked::Addons,
-            _ => Asked::Update,
+            _ => requested_version(&data).map_or(Asked::Update, Asked::Version),
         },
         Ok(None) => Asked::Nothing,
         Err(e) => Asked::Garbage(format!("{e:#}")),
     })
 }
 
-/// update/ itself may be what the panel replaced (a link, a file): the request inside it
-/// would stay for ever and the path unit would start this command again and again. The
-/// stand-in goes; the panel makes its directory again.
-fn clear_update_dir(say: &mut dyn FnMut(&str)) {
-    let Ok(Some(panel)) = Dir::open(Path::new(DIR), "data/panel", false) else { return };
-    if panel.exists("update") {
-        match panel.discard("update") {
-            Ok(()) => say("data/panel/update was not a directory: removed it"),
-            Err(e) => say(&format!("cannot remove data/panel/update: {e:#}")),
+/// The release version a node's request names: {"version": "X"} with X a version of a
+/// release, nothing else of it is read.
+fn requested_version(data: &[u8]) -> std::result::Result<String, String> {
+    let v: serde_json::Value = serde_json::from_slice(data).map_err(|e| format!("not JSON ({e})"))?;
+    let version = v.as_object().and_then(|o| o.get("version")).and_then(|x| x.as_str()).ok_or("no version in it")?;
+    if !release::valid_version(version) {
+        return Err("the version is not a release version".into());
+    }
+    Ok(version.to_owned())
+}
+
+/// update/ itself may be what the panel (or a node) replaced (a link, a file): the request
+/// inside it would stay for ever and the path unit would start this command again and
+/// again. The stand-in goes; the panel makes its directory again.
+fn clear_update_dir(node: bool, say: &mut dyn FnMut(&str)) {
+    let rel = update_rel(node);
+    let Ok(Some(owner)) = Dir::open(Path::new(DIR), rel.trim_end_matches("/update"), false) else { return };
+    if owner.exists("update") {
+        match owner.discard("update") {
+            Ok(()) => say(&format!("{rel} was not a directory: removed it")),
+            Err(e) => say(&format!("cannot remove {rel}: {e:#}")),
         }
     }
 }
 
 /// Whether the status the panel reads is an ending (ok, failed): the upgraded command an
 /// update handed over to has told it how it went, in its own words.
-fn status_ended() -> bool {
-    update_dir(false)
+fn status_ended(node: bool) -> bool {
+    update_dir(node, false)
         .ok()
         .flatten()
         .and_then(|d| d.read("status.json", 64 << 10).ok().flatten())
@@ -240,6 +299,8 @@ struct Attempt {
     handed_off: bool,
     /// Why the daily check left the update for later, for the panel to show.
     skipped: Option<String>,
+    /// The release a node's panel asked for, which the update goes to and no further.
+    upto: Option<String>,
 }
 
 /// Updates to the latest release (or target), upgrading the installer first when needed.
@@ -261,40 +322,60 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
         }
     };
     let install = Install::load()?;
+    // The daily run sweeps the support recordings that are past their 30 days, so that they
+    // go even when no terminal session comes after them.
+    if !a.check {
+        terminal::sweep(Path::new(DIR));
+    }
+    let mut at = Attempt { upto: upto_from_env(), ..Attempt::default() };
     if a.requested {
-        let dir = match update_dir(false) {
+        let dir = match update_dir(install.node, false) {
             Ok(d) => d,
             Err(e) => {
                 say(&format!("{e:#}"));
-                clear_update_dir(say);
+                clear_update_dir(install.node, say);
                 None
             }
         };
         let Some(dir) = dir else { return Ok(()) };
-        match take_request(&dir)? {
+        match take_request(&dir, install.node)? {
             Asked::Nothing => return Ok(()),
             // The panel wakes this unit for its payment adapters too.
-            Asked::Addons => return panel_addons(say),
+            Asked::Addons if !install.node => return addon::apply_here(say),
+            Asked::Addons => {
+                say("update/request is not a request, removed: adapters are the panel's");
+                return Ok(());
+            }
             Asked::Garbage(why) => {
                 say(&format!("update/request is not a request, removed: {why}"));
+                // A node's panel waits for an answer; the panel's own page needs none.
+                if install.node {
+                    report(&install, Phase::Failed, "", &install.version(), &format!("the update request was not valid: {why}"));
+                }
                 return Ok(());
             }
             Asked::Update => {}
+            Asked::Version(v) => at.upto = Some(v),
         }
     }
-    let mut at = Attempt::default();
     let r = update_to(a, say, progress, &mut at);
     // An adapter request that came while an update was asked for waits for it.
     if a.requested
         && addon::pending()
-        && let Err(e) = addon::apply(&install.version(), say)
+        && let Err(e) = addon::apply_here(say)
     {
-        say(&format!("Payment adapters: {e:#}"));
+        say(&format!("Addons: {e:#}"));
+    }
+    // The command that runs now says which addons it can run, whatever was asked of it. One
+    // that handed the update to the upgraded command leaves that to it: written after it, the
+    // older version would take back what the newer one said.
+    if !install.node && !at.handed_off {
+        addon::touch(say);
     }
     // The admin pressed Update and waits for an answer, and an update that began must end
     // in one: ok, failed, never "running" for good. What the upgraded command said about
     // its own work stays; it is told here only when it ended before telling.
-    if (a.requested || at.started) && !(at.handed_off && status_ended()) {
+    if (a.requested || at.started) && !(at.handed_off && at.skipped.is_none() && status_ended(install.node)) {
         let now = Install::load().unwrap_or(install);
         match (&r, &at.skipped) {
             (Ok(()), None) => report(&now, Phase::Ok, &at.version, &at.from, ""),
@@ -305,10 +386,143 @@ pub fn update(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMu
     r
 }
 
-fn panel_addons(say: &mut dyn FnMut(&str)) -> Result<()> {
-    let install = Install::load()?;
-    install.panel_only()?;
-    addon::apply(&install.version(), say)
+/// Where an update is going: the image to run and the version it says it is, with the
+/// signed release it came from when there is one.
+struct Target {
+    image: String,
+    version: String,
+    /// The signed release; none for an image or an archive the admin named.
+    manifest: Option<release::Manifest>,
+    /// The newest release, when this update is a hop on the way to it.
+    ahead: Option<String>,
+}
+
+/// What the update has settled before it touches anything: the database it starts from and
+/// the first backup, the proof that one can be made.
+struct Plan {
+    /// The panel runs on PostgreSQL already (a node never does).
+    was_postgres: bool,
+    /// The kind of archive the update leaves behind (the move from SQLite has its own).
+    kind: &'static str,
+    /// The backup made before the update stopped anything.
+    gate: PathBuf,
+}
+
+/// What an update goes back to, owned: the files as they were and the archive of the data.
+struct Snapshot {
+    /// The settings (as .env lines) and compose.yaml as they were.
+    env: String,
+    compose: String,
+    /// The newest archive of the data from before: the stopped panel's once that was made,
+    /// the backup before the update stopped anything until then.
+    saved: PathBuf,
+}
+
+/// The steps of an update after which a failure has a policy of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Failed {
+    /// Not enough room for the move from SQLite to PostgreSQL: nothing was touched.
+    Room,
+    /// The data of the stopped panel could not be archived (only a panel stops to archive).
+    Archive,
+    /// The .env, the compose file or the database service could not be made ready.
+    Prepare,
+    /// `database migrate` failed (only a panel has a database to migrate).
+    Migrate,
+    /// The new containers did not come up and answer.
+    Start,
+}
+
+/// What follows a failed step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Recovery {
+    /// The daily check leaves the update for a later night, and tells the panel why.
+    Skip,
+    /// The admin is told there is not enough room, and nothing was changed.
+    Refuse,
+    /// The panel, stopped for its archive, runs again as it was.
+    RestartPanel,
+    /// The error is returned as it is and nothing of the update is undone (a node's .env
+    /// and compose file stay at the new release).
+    Keep,
+    /// The .env and compose file from before come back and the previous version starts.
+    RestorePrevious,
+    /// The configuration from before comes back and the previous version starts on what the
+    /// update left in the database (roll_back); if it does not start, a panel stays stopped.
+    RollBack,
+    /// The panel is stopped already and stays so: the database may have changed in a way
+    /// nothing can undo, and the admin retries the update.
+    LeaveStopped,
+    /// The panel is stopped, with its data preserved: no automatic rollback is safe.
+    StopPanel,
+}
+
+/// What decide_recovery needs to know besides the step: plain values, no files or commands.
+#[derive(Clone, Copy, Debug)]
+struct Footing {
+    /// This server is a node.
+    node: bool,
+    /// The panel ran on PostgreSQL before the update.
+    was_postgres: bool,
+    /// The daily timer runs this (the admin and the panel's button do not).
+    daily: bool,
+    /// The schema versions `database migrate` reported, before and after, when it did.
+    schema: Option<(u64, u64)>,
+}
+
+/// What to do about a failed step: the policy of the whole update in one place.
+///
+/// - No room for the move from SQLite: the daily check waits for a later night, the admin
+///   is refused at once.
+/// - The panel could not be archived: it runs again.
+/// - The environment could not be prepared: a node leaves it, a panel puts the previous
+///   configuration back.
+/// - The database could not migrate: a panel on PostgreSQL already tries the previous
+///   version on what the migration left (each of its steps commits whole or not at all);
+///   the move from SQLite never goes back, because the import may have committed before
+///   losing its response.
+/// - The new version did not start: a node always goes back. A panel goes back only when it
+///   was on PostgreSQL already and the migration left the schema where it was: going back
+///   from SQLite would lose every write since the import, and an older binary refuses a
+///   newer schema. Otherwise it stays stopped.
+///
+/// The daily timer matters for the room alone. A step a node or a panel never takes (a
+/// node has no database to migrate or archive) is answered as a panel's would be.
+fn decide_recovery(failed: Failed, at: &Footing) -> Recovery {
+    match failed {
+        Failed::Room if at.daily => Recovery::Skip,
+        Failed::Room => Recovery::Refuse,
+        Failed::Archive => Recovery::RestartPanel,
+        Failed::Prepare if at.node => Recovery::Keep,
+        Failed::Prepare => Recovery::RestorePrevious,
+        Failed::Migrate if at.was_postgres => Recovery::RollBack,
+        Failed::Migrate => Recovery::LeaveStopped,
+        Failed::Start if !at.node && !(at.was_postgres && at.schema.is_some_and(|(from, to)| from == to)) => Recovery::StopPanel,
+        Failed::Start => Recovery::RollBack,
+    }
+}
+
+/// A step that failed after the update began to change things, with what is needed to
+/// undo it as far as decide_recovery says.
+struct Failure {
+    step: Failed,
+    error: anyhow::Error,
+    /// The schema versions `database migrate` reported, when it got that far.
+    schema: Option<(u64, u64)>,
+    snapshot: Snapshot,
+}
+
+/// How the changes went.
+enum Outcome {
+    /// The new version is up.
+    Running,
+    Failed(Failure),
+}
+
+impl Outcome {
+    fn failed(step: Failed, error: anyhow::Error, schema: Option<(u64, u64)>, snapshot: Snapshot) -> Result<Outcome> {
+        Ok(Outcome::Failed(Failure { step, error, schema, snapshot }))
+    }
 }
 
 fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut(f64), at: &mut Attempt) -> Result<()> {
@@ -320,23 +534,84 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
     let current = install.version();
     at.from.clone_from(&current);
     at.version.clone_from(&current);
-    let mut manifest = None;
-    // The newest release, when this update is a hop on the way to it.
-    let mut ahead = None;
-    let (image, version) = match a.target.as_deref() {
+    let Some(target) = resolve_target(a, &install, &current, say, progress, at)? else { return Ok(()) };
+    // The release index sends a server still on SQLite through the last release that moves
+    // it; an image named by hand is checked here, before anything changes.
+    if !install.node && install.config.get("MIRAI_DATABASE_URL").is_none() && !release::moves_sqlite(&target.version) {
+        bail!(
+            "mirai {} no longer moves the database from SQLite: update to mirai {} first, it moves it to PostgreSQL (`mirai update` with no image goes there by itself); nothing was changed",
+            target.version,
+            release::LAST_SQLITE_MOVE
+        );
+    }
+    at.version.clone_from(&target.version);
+    if !at.started {
+        at.started = true;
+        report(&install, Phase::Running, &target.version, &current, "");
+    }
+    if hand_off(&target, daily, at, say)? {
+        return next_hop(target.ahead.as_deref(), daily, at, say);
+    }
+    let Some(plan) = preflight(&install, daily, at, say, progress)? else { return Ok(()) };
+
+    // From here until the new version is up or the old one is back, nothing may cut it short.
+    let _critical = signals::critical();
+    let was_postgres = plan.was_postgres;
+    match apply(&mut install, &target, plan, say)? {
+        Outcome::Running => finish(&install, target, daily, at, say),
+        Outcome::Failed(failure) => {
+            let footing = Footing { node: install.node, was_postgres, daily, schema: failure.schema };
+            Err(recover(&mut install, &target.version, &current, failure, &footing, say))
+        }
+    }
+}
+
+/// Settles what the update goes to: a signed release found in the index (or the newest one
+/// before it, when the server cannot reach it at once), or the image or archive the admin
+/// named. none when there is nothing to do, or the question was only `--check`: what there
+/// was to say has been said.
+fn resolve_target(
+    a: &UpdateArgs,
+    install: &Install,
+    current: &str,
+    say: &mut dyn FnMut(&str),
+    progress: &mut dyn FnMut(f64),
+    at: &mut Attempt,
+) -> Result<Option<Target>> {
+    // What a node's panel asked for (or an earlier hop of that) is only ever a step up.
+    let upto = a.target.is_none().then(|| at.upto.clone()).flatten();
+    if let Some(upto) = &upto {
+        match upto_step(current, upto) {
+            Step::Refuse(why) => bail!(why),
+            Step::Already => {
+                say(&format!("mirai {current} is the release asked for."));
+                return Ok(None);
+            }
+            Step::Go => {}
+        }
+    }
+    let target = match a.target.as_deref() {
         Some(t) if Path::new(t).is_file() => {
             say(&format!("Loading {t}"));
             let image = docker::load(t)?;
-            let v = setup::image_version(&image)?;
-            (image, v)
+            let version = setup::image_version(&image)?;
+            Target { image, version, manifest: None, ahead: None }
         }
         Some(t) => {
             say(&format!("Pulling {t}"));
             docker::pull(t, &mut *progress)?;
-            (t.to_owned(), setup::image_version(t)?)
+            Target { image: t.to_owned(), version: setup::image_version(t)?, manifest: None, ahead: None }
         }
         None => {
-            let found = release::find(Some(&current), channel(&install))?;
+            let found = match &upto {
+                Some(upto) => {
+                    let channel = upto_channel(channel(install), upto);
+                    retry_refused(INDEX_TRIES, &mut || std::thread::sleep(INDEX_WAIT), say, upto, || {
+                        release::find_upto(current, channel, upto)
+                    })?
+                }
+                None => release::find(Some(current), channel(install))?,
+            };
             if let Some(why) = &found.fallback {
                 say(&format!("The release index is unavailable ({why}): the latest release on GitHub answers instead."));
             }
@@ -347,16 +622,16 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
                     say(&format!(
                         "mirai {newest} is out, but mirai {current} cannot update to it directly and no release in between is listed."
                     ));
-                    return Ok(());
+                    return Ok(None);
                 }
                 bail!("mirai {newest} is out, but mirai {current} cannot update to it directly and no release in between is listed");
             }
-            if already_current(&m.version, &current, a.check || install.node || docker::panel_healthy()) {
+            if already_current(&m.version, current, a.check || install.node || docker::panel_healthy()) {
                 say(&format!("mirai {current} is the latest release."));
                 if !a.check && self_update(&m, say) {
                     follow_new_command(say);
                 }
-                return Ok(());
+                return Ok(None);
             }
             if a.check {
                 match &found.newest {
@@ -368,13 +643,13 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
                 if let Some(notes) = m.notes.get("en") {
                     say(notes);
                 }
-                return Ok(());
+                return Ok(None);
             }
-            ahead = found.newest;
+            let ahead = found.newest;
             say(&format!("Updating mirai {current} → {}", m.version));
             at.version.clone_from(&m.version);
             at.started = true;
-            report(&install, Phase::Running, &m.version, &current, "");
+            report(install, Phase::Running, &m.version, current, "");
             let reference = m.reference();
             docker::pull(&reference, &mut *progress)?;
             // The release names its version: an image that says another is not the one
@@ -384,57 +659,69 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
                 bail!("the image is mirai {v}, the signed release says {}", m.version);
             }
             let version = m.version.clone();
-            manifest = Some(m);
-            (reference, version)
+            Target { image: reference, version, manifest: Some(m), ahead }
         }
     };
     if a.check {
-        say(&format!("{image} is mirai {version}; this server runs {current}."));
-        return Ok(());
+        say(&format!("{} is mirai {}; this server runs {current}.", target.image, target.version));
+        return Ok(None);
     }
-    at.version.clone_from(&version);
-    if !at.started {
-        at.started = true;
-        report(&install, Phase::Running, &version, &current, "");
-    }
+    Ok(Some(target))
+}
 
-    if let Some(m) = &manifest {
-        let upgrade = self_update(m, say);
-        if upgrade {
-            // The new installer must prepare infrastructure before the image starts.
-            // The signed image was already verified above; hand off under our lock.
-            let mut child = Command::new(host::BIN);
-            child.args(["update", &image]).env(lock::HELD_ENV, "1");
-            if daily {
-                // so that it, too, leaves a move it has no room for to a later night
-                child.arg("--auto");
-            }
-            at.handed_off = true;
-            let status = child.status()?;
-            if !status.success() {
-                bail!("the upgraded installer could not finish the update; retry mirai update");
-            }
-            return next_hop(ahead.as_deref(), daily, at, say);
+/// Hands the update to the installer of the release when that one is newer than this one,
+/// and tells whether it did (the update is over then: the new installer prepared the
+/// infrastructure and ran it). An installer too old for the release, which could not be
+/// upgraded, stops the update.
+fn hand_off(target: &Target, daily: bool, at: &mut Attempt, say: &mut dyn FnMut(&str)) -> Result<bool> {
+    let Some(m) = &target.manifest else { return Ok(false) };
+    if self_update(m, say) {
+        // The new installer must prepare infrastructure before the image starts.
+        // The signed image was already verified above; hand off under our lock.
+        let mut child = Command::new(host::BIN);
+        child.args(["update", &target.image]).env(lock::HELD_ENV, "1");
+        if daily {
+            // so that it, too, leaves a move it has no room for to a later night
+            child.arg("--auto");
         }
-        if !m.min_installer.is_empty() && release::newer(&m.min_installer, crate::version()) {
-            bail!(
-                "this release requires installer {}; its verified upgrade failed. Run the signed one-line installer again before updating",
-                m.min_installer
-            );
+        at.handed_off = true;
+        let status = child.status()?;
+        if !status.success() {
+            bail!("the upgraded installer could not finish the update; retry mirai update");
         }
+        return Ok(true);
     }
+    if !m.min_installer.is_empty() && release::newer(&m.min_installer, crate::version()) {
+        bail!(
+            "this release requires installer {}; its verified upgrade failed. Run the signed one-line installer again before updating",
+            m.min_installer
+        );
+    }
+    Ok(false)
+}
 
+/// Everything that can be refused before anything stops: the room for the move from SQLite
+/// (the daily check leaves it for a later night, the admin is told why), the PostgreSQL
+/// image and a backup. none when the daily check waits for a later night.
+fn preflight(
+    install: &Install,
+    daily: bool,
+    at: &mut Attempt,
+    say: &mut dyn FnMut(&str),
+    progress: &mut dyn FnMut(f64),
+) -> Result<Option<Plan>> {
     let root = Path::new(DIR);
-    let was_postgres = install.env.get("MIRAI_DATABASE_URL").is_some();
+    let was_postgres = install.config.get("MIRAI_DATABASE_URL").is_some();
     // The move from SQLite cannot be undone once it imported: it starts only with room for
     // it. The daily check leaves it for a later night, the admin is told why.
     let moving = !install.node && !was_postgres;
     if moving && let Err(why) = room_to_move(root) {
-        if daily {
+        let footing = Footing { node: install.node, was_postgres, daily, schema: None };
+        if decide_recovery(Failed::Room, &footing) == Recovery::Skip {
             let why = format!("the move to PostgreSQL waits for room: {why}");
             say(&format!("No update tonight: {why}"));
             at.skipped = Some(why);
-            return Ok(());
+            return Ok(None);
         }
         bail!("the move to PostgreSQL needs more room, nothing was changed: {why}");
     }
@@ -447,100 +734,209 @@ fn update_to(a: &UpdateArgs, say: &mut dyn FnMut(&str), progress: &mut dyn FnMut
     // A backup that cannot be made stops the update before changing its image or data.
     let kind = if moving { backup::PRE_POSTGRES } else { backup::PRE_UPDATE };
     let gate = backup::backup_as(kind, say).context("the backup before the update failed; nothing was changed")?;
+    Ok(Some(Plan { was_postgres, kind, gate }))
+}
 
-    // From here until the new version is up or the old one is back, nothing may cut it short.
-    let _critical = signals::critical();
+/// Changes things: the data is archived with the panel stopped, the settings and compose file
+/// are written for the new image, the database migrates and the containers start. An
+/// error that comes out of here is one nothing is to be done about; a step that failed
+/// comes out as the outcome, for decide_recovery.
+fn apply(install: &mut Install, target: &Target, plan: Plan, say: &mut dyn FnMut(&str)) -> Result<Outcome> {
+    let root = Path::new(DIR);
     let old_compose = fs::read_to_string(root.join("compose.yaml")).context("read the current compose file")?;
-    let old_env = install.env.render();
-    let saved = if install.node {
-        gate
-    } else {
+    let old_env = install.config.to_env_text();
+    let mut snapshot = Snapshot { env: old_env, compose: old_compose, saved: plan.gate };
+    if !install.node {
         // The archive to go back to holds every payment and bot update accepted until the
         // old process shut down (SQLite with its WAL, PostgreSQL dumped now); the one above
         // proved a backup can be made while nothing had changed yet, and goes.
         docker::compose_run(&["stop", "panel"])?;
-        match backup::archive_stopped(root, kind, true) {
+        match backup::archive_stopped(root, plan.kind, true) {
             Ok(last) => {
-                let _ = fs::remove_file(&gate);
-                last
+                let _ = fs::remove_file(&snapshot.saved);
+                snapshot.saved = last;
             }
-            Err(e) => {
-                docker::compose_run(&["up", "-d", "panel"])?;
-                return Err(e.context("the data of the stopped panel could not be saved; the update stopped and the panel runs again"));
-            }
+            Err(e) => return Outcome::failed(Failed::Archive, e, None, snapshot),
         }
-    };
-    say(&format!("Backup: {}", saved.display()));
-    let before = Before { env: &old_env, compose: &old_compose, saved: &saved, current: &current };
+    }
+    say(&format!("Backup: {}", snapshot.saved.display()));
 
     // Until the database migrates, the configuration from before can come back as it was.
     let prepared = (|| -> Result<()> {
         if !install.node {
-            setup::postgres_env(&mut install.env)?;
+            setup::postgres_env(&mut install.config)?;
         }
-        install.env.set("MIRAI_IMAGE", &image)?;
-        install.env.set("MIRAI_VERSION", &version)?;
-        install.env.save()?;
-        docker::ensure_compose(root, install.node)?;
+        install.config.set("MIRAI_IMAGE", &target.image)?;
+        install.config.set("MIRAI_VERSION", &target.version)?;
+        docker::ensure_compose(root, &install.config)?;
         if !install.node {
             docker::postgres_ready()?;
         }
         Ok(())
     })();
     if let Err(e) = prepared {
-        if install.node {
-            return Err(e);
-        }
-        return Err(match restore_previous(root, &install.env, &old_env, &old_compose, was_postgres) {
-            Ok(()) => e.context(format!("the update could not prepare the database; mirai {current} runs again")),
-            Err(back) => e.context(format!(
-                "the update could not prepare the database, and mirai {current} did not start again ({back:#}); backup: {}",
-                saved.display()
-            )),
-        });
+        return Outcome::failed(Failed::Prepare, e, None, snapshot);
     }
     let mut schema = None;
     if !install.node {
         match docker::database(&["migrate"]) {
             Ok(out) => schema = schema_change(&String::from_utf8_lossy(&out.stdout)),
-            // On PostgreSQL already the previous version is tried on what the migration
-            // left (each of its steps commits whole or not at all); one that refuses a
-            // schema moved forward leaves the panel stopped.
-            Err(e) if was_postgres => {
-                say(&format!("mirai {version} could not migrate the database: going back to {current}"));
-                return Err(roll_back(&mut install, &before, &format!("mirai {version} could not migrate the database: {e:#}")));
-            }
-            // A failed import may have committed before losing its response. Never fall
-            // back to stale SQLite or restore a snapshot implicitly after this.
-            Err(e) => {
-                return Err(e.context(format!(
-                    "database migration did not finish; panel stays stopped, original SQLite and PostgreSQL preserved. Run mirai update again; backup: {}",
-                    saved.display()
-                )));
-            }
+            Err(e) => return Outcome::failed(Failed::Migrate, e, None, snapshot),
         }
     }
-    if let Err(e) = start(&install, root) {
-        // The previous image runs on what this update left only when that was PostgreSQL
-        // already and the schema did not move: going back from SQLite would lose every
-        // write since the import, and an older binary refuses a newer schema.
-        if !install.node && !(was_postgres && schema.is_some_and(|(from, to)| from == to)) {
+    if let Err(e) = start(install, root) {
+        return Outcome::failed(Failed::Start, e, schema, snapshot);
+    }
+    // The new version runs on config.json and secrets/: a .env from before goes (the
+    // update's archive keeps it).
+    if let Err(e) = install.config.retire_legacy() {
+        say(&format!("Remove {} by hand: {e:#}", root.join(crate::config::LEGACY).display()));
+    }
+    Ok(Outcome::Running)
+}
+
+/// A panel left at the new release after a failure runs on config.json and secrets/, which
+/// the update wrote before it migrated: a .env from before goes (the update's archive keeps
+/// it). Left there, it is what the next update reads, and a move from SQLite whose import
+/// committed would be taken for one not made and imported again over the newer data.
+fn leave_new(install: &mut Install, say: &mut dyn FnMut(&str)) {
+    if let Err(e) = install.config.retire_legacy() {
+        say(&format!("Remove {} by hand: {e:#}", Path::new(DIR).join(crate::config::LEGACY).display()));
+    }
+}
+
+/// Puts things right after a failed step as decide_recovery says, and returns the error the
+/// update ends with.
+fn recover(
+    install: &mut Install,
+    version: &str,
+    current: &str,
+    failure: Failure,
+    footing: &Footing,
+    say: &mut dyn FnMut(&str),
+) -> anyhow::Error {
+    let root = Path::new(DIR);
+    let Failure { step, error: e, snapshot, .. } = failure;
+    let saved = snapshot.saved.display();
+    match decide_recovery(step, footing) {
+        Recovery::RestartPanel => {
+            if let Err(e) = docker::compose_run(&["up", "-d", "panel"]) {
+                return e;
+            }
+            e.context("the data of the stopped panel could not be saved; the update stopped and the panel runs again")
+        }
+        Recovery::RestorePrevious => {
+            match restore_previous(root, &install.config, &snapshot.env, &snapshot.compose, footing.was_postgres) {
+                Ok(()) => e.context(format!("the update could not prepare the database; mirai {current} runs again")),
+                Err(back) => e.context(format!(
+                    "the update could not prepare the database, and mirai {current} did not start again ({back:#}); backup: {saved}"
+                )),
+            }
+        }
+        // The previous version is tried on what this update left: on PostgreSQL already
+        // (each migration step commits whole or not at all), and for a panel that did not
+        // start only when the schema did not move.
+        Recovery::RollBack => {
+            let what = if step == Failed::Migrate { "could not migrate the database" } else { "did not start" };
+            say(&format!("mirai {version} {what}: going back to {current}"));
+            let before = Before { env: &snapshot.env, compose: &snapshot.compose, saved: &snapshot.saved, current };
+            roll_back(install, &before, &format!("mirai {version} {what}: {e:#}"))
+        }
+        // A failed import may have committed before losing its response. Never fall
+        // back to stale SQLite or restore a snapshot implicitly after this.
+        Recovery::LeaveStopped => {
+            leave_new(install, say);
+            e.context(format!(
+                "database migration did not finish; panel stays stopped, original SQLite and PostgreSQL preserved. Run mirai update again; backup: {saved}"
+            ))
+        }
+        // Going back from SQLite would lose every write since the import, and an older
+        // binary refuses a newer schema.
+        Recovery::StopPanel => {
             let _ = docker::compose_run(&["stop", "panel"]);
-            return Err(e.context(format!("PostgreSQL is preserved and the panel is stopped. No automatic database rollback is safe; retry mirai update after fixing startup. Backup: {}", saved.display())));
+            leave_new(install, say);
+            e.context(format!("PostgreSQL is preserved and the panel is stopped. No automatic database rollback is safe; retry mirai update after fixing startup. Backup: {saved}"))
         }
-        say(&format!("mirai {version} did not start: going back to {current}"));
-        return Err(roll_back(&mut install, &before, &format!("mirai {version} did not start: {e:#}")));
+        // Decided before anything changed (preflight), or nothing to undo.
+        Recovery::Keep | Recovery::Skip | Recovery::Refuse => e,
     }
-    seal_when_current(root, install.node, say);
-    say(&format!("mirai {version} is running."));
-    if let Some(m) = manifest
-        && self_update(&m, say)
+}
+
+/// The new version is up: the data is sealed, the units and the installer follow, and the
+/// next hop of the chain starts.
+fn finish(install: &Install, target: Target, daily: bool, at: &mut Attempt, say: &mut dyn FnMut(&str)) -> Result<()> {
+    seal_when_current(Path::new(DIR), &install.config, say);
+    say(&format!("mirai {} is running.", target.version));
+    if let Some(m) = &target.manifest
+        && self_update(m, say)
     {
         follow_new_command(say);
     } else if let Err(e) = host::install_units(!install.node) {
         say(&format!("No automatic updates: {e:#}"));
     }
-    next_hop(ahead.as_deref(), daily, at, say)
+    next_hop(target.ahead.as_deref(), daily, at, say)
+}
+
+/// What a request for the release upto means for a server running current.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    /// An older release: never.
+    Refuse(String),
+    /// It runs already.
+    Already,
+    Go,
+}
+
+fn upto_step(current: &str, upto: &str) -> Step {
+    if release::newer(current, upto) {
+        Step::Refuse(format!("mirai {upto} is older than the mirai {current} this server runs: a server does not go back"))
+    } else if release::newer(upto, current) {
+        Step::Go
+    } else {
+        Step::Already
+    }
+}
+
+/// The channel a request for upto is looked up in: the server's, and beta for a
+/// pre-release, which the panel runs and the admin chose.
+/// How often the index is read again for a release it does not list yet, and how long apart:
+/// GitHub serves an old copy of index.json for a few minutes after a release, while the
+/// panel that asked may already have the new one.
+const INDEX_TRIES: u32 = 4;
+const INDEX_WAIT: Duration = Duration::from_secs(15);
+
+/// find, again after wait while the index refuses upto (an old copy of it), at most tries
+/// times; the last refusal says what to do.
+fn retry_refused<T>(
+    tries: u32,
+    wait: &mut dyn FnMut(),
+    say: &mut dyn FnMut(&str),
+    upto: &str,
+    mut find: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let mut left = tries.max(1);
+    loop {
+        left -= 1;
+        match find() {
+            Err(e) if release::refused(&e) && left > 0 => {
+                say(&format!(
+                    "The release index here does not list mirai {upto} yet: GitHub may still serve an old copy. Reading it again in {} s.",
+                    INDEX_WAIT.as_secs()
+                ));
+                wait();
+            }
+            Err(e) if release::refused(&e) => {
+                return Err(e.context(format!(
+                    "GitHub still serves this server an old release index without mirai {upto}: press Update again in a few minutes"
+                )));
+            }
+            r => return r,
+        }
+    }
+}
+
+fn upto_channel(channel: Channel, upto: &str) -> Channel {
+    if release::is_prerelease(upto) { Channel::Beta } else { channel }
 }
 
 /// Retry an unhealthy release with the same version, but never turn a stale signed
@@ -549,7 +945,7 @@ fn already_current(latest: &str, current: &str, healthy_or_check: bool) -> bool 
     release::newer(current, latest) || (!release::newer(latest, current) && healthy_or_check)
 }
 
-/// Starts the containers on the current .env and waits for them.
+/// Starts the containers on the current settings and waits for them.
 fn start(install: &Install, root: &Path) -> Result<()> {
     panelfs::own_dirs(root, !install.node)?;
     docker::compose_run(&["up", "-d"])?;
@@ -563,20 +959,27 @@ fn schema_change(out: &str) -> Option<(u64, u64)> {
     Some((from.trim().parse().ok()?, to.trim().parse().ok()?))
 }
 
-/// The .env from before the update, to be written once. A PostgreSQL password made
+/// The settings from before the update, to be written once. A PostgreSQL password made
 /// meanwhile stays: its volume may already be initialized with it, and another one on the
 /// next attempt would lock the panel out of its own database.
-fn previous_env(root: &Path, now: &EnvFile, old_env: &str) -> Result<EnvFile> {
-    let mut env = EnvFile::from_text(root.join(".env"), old_env);
+fn previous_env(root: &Path, now: &Config, old_env: &str) -> Result<Config> {
+    let mut env = Config::from_env_text(root, old_env);
     if let Some(password) = now.get("MIRAI_POSTGRES_PASSWORD") {
         env.set("MIRAI_POSTGRES_PASSWORD", password)?;
     }
     Ok(env)
 }
 
+/// Writes the settings from before back in the form the compose.yaml from before reads:
+/// .env for one of a mirai before config.json (its ${...} come from it), the files always.
+fn put_previous(config: &Config, old_compose: &str) -> Result<()> {
+    config.save()?;
+    if old_compose.contains("${") { config.write_legacy() } else { Ok(()) }
+}
+
 /// Puts the configuration from before the update back, starts it and waits for it.
-fn restore_previous(root: &Path, now: &EnvFile, old_env: &str, old_compose: &str, was_postgres: bool) -> Result<()> {
-    previous_env(root, now, old_env)?.save()?;
+fn restore_previous(root: &Path, now: &Config, old_env: &str, old_compose: &str, was_postgres: bool) -> Result<()> {
+    put_previous(&previous_env(root, now, old_env)?, old_compose)?;
     if !was_postgres {
         // The compose file from before has no database service to stop it by later.
         let _ = docker::compose_run(&["stop", "postgres"]);
@@ -593,8 +996,8 @@ fn roll_back(install: &mut Install, before: &Before, why: &str) -> anyhow::Error
     let root = Path::new(DIR);
     let (current, saved) = (before.current, before.saved.display());
     let back = (|| -> Result<()> {
-        install.env = previous_env(root, &install.env, before.env)?;
-        install.env.save()?;
+        install.config = previous_env(root, &install.config, before.env)?;
+        put_previous(&install.config, before.compose)?;
         docker::put_compose(root, before.compose)?;
         start(install, root)
     })();
@@ -616,7 +1019,7 @@ fn roll_back(install: &mut Install, before: &Before, why: &str) -> anyhow::Error
 
 /// What an update goes back to.
 struct Before<'a> {
-    /// .env and compose.yaml as they were.
+    /// The settings (as .env lines) and compose.yaml as they were.
     env: &'a str,
     compose: &'a str,
     /// The archive of the data from before.
@@ -651,8 +1054,9 @@ fn move_fits(free: Option<u64>, mem_mb: Option<u64>, data: u64) -> std::result::
 
 /// data/ becomes root's once no container can mount all of it: with the current
 /// compose.yaml. An older one (the migration failed) would be locked out of its data.
-fn seal_when_current(root: &Path, node: bool, say: &mut dyn FnMut(&str)) {
-    if fs::read_to_string(root.join("compose.yaml")).is_ok_and(|c| c == docker::compose_text(node))
+fn seal_when_current(root: &Path, config: &Config, say: &mut dyn FnMut(&str)) {
+    let current = docker::compose_text(config).ok();
+    if fs::read_to_string(root.join("compose.yaml")).is_ok_and(|c| current.as_deref() == Some(c.as_str()))
         && let Err(e) = panelfs::seal(root)
     {
         say(&format!("data/ stays as it was: {e:#}"));
@@ -666,24 +1070,40 @@ pub fn converge(say: &mut dyn FnMut(&str)) -> Result<()> {
     let _lock = lock::acquire(Wait::Block, say)?;
     let install = Install::load()?;
     let root = Path::new(DIR);
-    if !install.node && install.env.get("MIRAI_DATABASE_URL").is_none() {
+    // The pool of ports the panel moves a blocked inbound to may have grown since the
+    // install opened it, and a node installed before public node certificates lacks port 80:
+    // ufw gets them again (a rule it has is left as it is).
+    if install.ufw()
+        && crate::system::ufw_active()
+        && let Err(e) = host::update_rules().iter().try_for_each(|r| host::allow(r))
+    {
+        say(&format!("ufw did not take port 80 and the ports of the pool ({e:#}): open them yourself"));
+    }
+    if !install.node && install.config.get("MIRAI_DATABASE_URL").is_none() {
         // post-update must never activate the PostgreSQL compose over a live SQLite
         // installation. `update` is the only operation that performs the cutover.
         say("This SQLite installation needs mirai update before its compose file can change.");
         return Ok(());
     }
     // Where systemd is: a server without it has no units to bring up to date.
-    if Path::new("/run/systemd/system").exists() && !host::units_current() {
+    if Path::new("/run/systemd/system").exists() && !host::units_current(!install.node) {
         match host::install_units(!install.node) {
             Ok(()) => say("The update units are the current ones."),
             Err(e) => say(&format!("No automatic updates: {e:#}")),
         }
     }
     let running = docker::services().is_ok_and(|s| s.iter().any(|s| s.state == "running"));
-    let Some(old) = docker::ensure_compose(root, install.node)? else {
+    let mut install = install;
+    // A server of before config.json moves its settings here: the files first (the new
+    // compose.yaml mounts them), .env once the containers run on them.
+    let moving = install.config.legacy();
+    let Some(old) = docker::ensure_compose(root, &install.config)? else {
         if running {
-            // compose.yaml is already the current one: data/ may be sealed.
+            // compose.yaml is already the current one: data/ may be sealed, .env may go.
             let _ = panelfs::seal(root);
+            if moving {
+                install.config.retire_legacy()?;
+            }
         }
         return Ok(());
     };
@@ -698,6 +1118,10 @@ pub fn converge(say: &mut dyn FnMut(&str)) -> Result<()> {
         docker::put_compose(root, &old)?;
         start(&install, root).context("the previous compose.yaml does not start either")?;
         bail!("the new compose.yaml did not start: {e:#}");
+    }
+    if moving {
+        install.config.retire_legacy()?;
+        say("The settings are in config.json and the secrets in secrets/ now: .env is gone (the last update's backup keeps it)");
     }
     panelfs::seal(root)
 }
@@ -719,12 +1143,11 @@ fn self_update(m: &release::Manifest, say: &mut dyn FnMut(&str)) -> bool {
     if release::newer(crate::version(), &m.version) {
         return false;
     }
-    let sha = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
-    if fs::read(host::BIN).map(|b| sha(&b)).ok().as_deref() == Some(asset.sha256.as_str()) {
+    if fs::read(host::BIN).map(|b| release::sha256_hex(&b)).ok().as_deref() == Some(asset.sha256.as_str()) {
         return false;
     }
     let result = net::get(&asset.url, 64 << 20).and_then(|data| {
-        if sha(&data) != asset.sha256 {
+        if release::sha256_hex(&data) != asset.sha256 {
             bail!("the downloaded installer does not match the release manifest");
         }
         host::replace_bin(&data, Some(&m.version))
@@ -746,6 +1169,90 @@ mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
 
+    fn footing(node: bool, was_postgres: bool, daily: bool, schema: Option<(u64, u64)>) -> Footing {
+        Footing { node, was_postgres, daily, schema }
+    }
+
+    /// Every combination of the plain values a decision may read.
+    fn all_footings() -> Vec<Footing> {
+        let mut all = Vec::new();
+        for node in [false, true] {
+            for was_postgres in [false, true] {
+                for daily in [false, true] {
+                    for schema in [None, Some((7, 7)), Some((7, 8)), Some((0, 0))] {
+                        all.push(footing(node, was_postgres, daily, schema));
+                    }
+                }
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn no_room_waits_for_a_night_or_refuses_the_admin() {
+        // Only the move from SQLite checks room, and only a panel makes it.
+        assert_eq!(decide_recovery(Failed::Room, &footing(false, false, true, None)), Recovery::Skip);
+        assert_eq!(decide_recovery(Failed::Room, &footing(false, false, false, None)), Recovery::Refuse);
+    }
+
+    #[test]
+    fn a_panel_that_could_not_be_archived_runs_again() {
+        for f in all_footings().into_iter().filter(|f| !f.node) {
+            assert_eq!(decide_recovery(Failed::Archive, &f), Recovery::RestartPanel, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn a_node_that_could_not_prepare_keeps_the_error_a_panel_restores() {
+        for f in all_footings() {
+            let want = if f.node { Recovery::Keep } else { Recovery::RestorePrevious };
+            assert_eq!(decide_recovery(Failed::Prepare, &f), want, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn only_a_panel_on_postgres_goes_back_when_the_migration_fails() {
+        // A node never migrates, so only panels are in the table.
+        for f in all_footings().into_iter().filter(|f| !f.node) {
+            let want = if f.was_postgres { Recovery::RollBack } else { Recovery::LeaveStopped };
+            assert_eq!(decide_recovery(Failed::Migrate, &f), want, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn a_node_always_goes_back_when_it_does_not_start() {
+        for f in all_footings().into_iter().filter(|f| f.node) {
+            assert_eq!(decide_recovery(Failed::Start, &f), Recovery::RollBack, "{f:?}");
+        }
+    }
+
+    #[test]
+    fn a_panel_goes_back_from_a_failed_start_only_on_postgres_with_the_schema_unmoved() {
+        for daily in [false, true] {
+            // PostgreSQL already, schema where it was: the previous image can run on it.
+            assert_eq!(decide_recovery(Failed::Start, &footing(false, true, daily, Some((7, 7)))), Recovery::RollBack);
+            assert_eq!(decide_recovery(Failed::Start, &footing(false, true, daily, Some((0, 0)))), Recovery::RollBack);
+            // The schema moved forward, or nobody knows whether it did: an older binary
+            // would refuse it, the panel stays stopped.
+            assert_eq!(decide_recovery(Failed::Start, &footing(false, true, daily, Some((7, 8)))), Recovery::StopPanel);
+            assert_eq!(decide_recovery(Failed::Start, &footing(false, true, daily, None)), Recovery::StopPanel);
+            // From SQLite never, whatever the migration reported: the import is not undone.
+            for schema in [None, Some((7, 7)), Some((7, 8))] {
+                assert_eq!(decide_recovery(Failed::Start, &footing(false, false, daily, schema)), Recovery::StopPanel);
+            }
+        }
+    }
+
+    #[test]
+    fn the_daily_timer_changes_the_room_and_nothing_else() {
+        for f in all_footings() {
+            for step in [Failed::Archive, Failed::Prepare, Failed::Migrate, Failed::Start] {
+                let other = Footing { daily: !f.daily, ..f };
+                assert_eq!(decide_recovery(step, &f), decide_recovery(step, &other), "{step:?} {f:?}");
+            }
+        }
+    }
+
     #[test]
     fn schema_change_is_read_from_the_migrate_report() {
         let out = "PostgreSQL schema version: 1 -> 1\nSQLite import verified: 31 tables; original SQLite preserved\n";
@@ -755,19 +1262,35 @@ mod tests {
         assert_eq!(schema_change("PostgreSQL schema version: one -> 2\n"), None);
     }
 
-    // The .env goes back in one write, with the password a database volume may already
+    // The settings go back in one write, with the password a database volume may already
     // have been initialized with, and without the address of a database it never used.
     #[test]
     fn the_previous_env_keeps_a_new_database_password() {
         let old = "MIRAI_IMAGE=old-image\nMIRAI_VERSION=0.4.4\nPANEL_PORT=21355\n";
-        let now = EnvFile::from_text(
+        let now = Config::from_env_text(
             "x",
             "MIRAI_IMAGE=new-image\nMIRAI_VERSION=0.5.0.1\nPANEL_PORT=21355\nMIRAI_POSTGRES_PASSWORD=made\nMIRAI_DATABASE_URL=postgresql://mirai:made@localhost/mirai?host=/run/postgresql\n",
         );
         let env = previous_env(Path::new("/opt/mirai"), &now, old).unwrap();
-        assert_eq!(env.render(), format!("{old}MIRAI_POSTGRES_PASSWORD=made\n"));
-        let unchanged = previous_env(Path::new("/opt/mirai"), &EnvFile::from_text("x", ""), old).unwrap();
-        assert_eq!(unchanged.render(), old);
+        assert_eq!(env.to_env_text(), "MIRAI_IMAGE=old-image\nMIRAI_POSTGRES_PASSWORD=made\nMIRAI_VERSION=0.4.4\nPANEL_PORT=21355\n");
+        let unchanged = previous_env(Path::new("/opt/mirai"), &Config::from_env_text("x", ""), old).unwrap();
+        assert_eq!(unchanged.to_env_text(), old);
+        assert_eq!(unchanged.get("MIRAI_DATABASE_URL"), None);
+    }
+
+    // A rollback to a mirai of before config.json writes .env back for its compose.yaml; one
+    // to a mirai that reads the files leaves no .env with secrets on disk.
+    #[test]
+    fn a_rollback_writes_env_only_for_a_compose_that_reads_it() {
+        let d = std::env::temp_dir().join(format!("put-previous-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let config = Config::from_env_text(&d, "MIRAI_IMAGE=old\nPANEL_PORT=21355\nMIRAI_POSTGRES_PASSWORD=pw123456\n");
+        put_previous(&config, "services:\n  panel:\n    image: x\n").unwrap();
+        assert!(!d.join(crate::config::LEGACY).exists() && d.join(crate::config::FILE).exists());
+        put_previous(&config, "services:\n  panel:\n    image: ${MIRAI_IMAGE}\n").unwrap();
+        assert_eq!(fs::read_to_string(d.join(crate::config::LEGACY)).unwrap(), config.to_env_text());
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
@@ -801,20 +1324,51 @@ mod tests {
         Dir::open(d, ".", false).unwrap().unwrap()
     }
 
-    // The panel's Update button writes {"at": …}; its adapters write {"do": "addons"}.
+    // The panel's Update button writes {"at": …} and the release its page showed; its adapters
+    // write {"do": "addons"}. A version that is not one is no version.
     #[test]
     fn the_panels_requests() {
         let d = tmpdir("requests");
         let dir = open(&d);
-        assert_eq!(take_request(&dir).unwrap(), Asked::Nothing);
-        for (body, want) in
-            [(r#"{"at":"2026-10-01T00:00:00Z"}"#, Asked::Update), (r#"{"do":"addons"}"#, Asked::Addons), ("not json", Asked::Update)]
-        {
+        assert_eq!(take_request(&dir, false).unwrap(), Asked::Nothing);
+        for (body, want) in [
+            (r#"{"at":"2026-10-01T00:00:00Z"}"#, Asked::Update),
+            (r#"{"at":"2026-10-01T00:00:00Z","version":"0.5.1.1-rc.9"}"#, Asked::Version("0.5.1.1-rc.9".into())),
+            (r#"{"at":"2026-10-01T00:00:00Z","version":"latest"}"#, Asked::Update),
+            (r#"{"do":"addons"}"#, Asked::Addons),
+            ("not json", Asked::Update),
+        ] {
             fs::write(d.join("request"), body).unwrap();
-            assert_eq!(take_request(&dir).unwrap(), want, "{body}");
+            assert_eq!(take_request(&dir, false).unwrap(), want, "{body}");
             assert!(!d.join("request").exists(), "the request must go at once");
         }
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    // An old copy of the index (GitHub's cache after a release) is read again, a few times,
+    // and the last refusal says to press Update again; anything else is not retried.
+    #[test]
+    fn an_old_index_is_read_again() {
+        let refused = || -> Result<u32> { Err(release::refused_for_test("mirai 9.9.9 is not a release")) };
+        let (mut waits, mut said) = (0, Vec::new());
+        let mut calls = 0;
+        let r = retry_refused(3, &mut || waits += 1, &mut |s| said.push(s.to_owned()), "9.9.9", || {
+            calls += 1;
+            if calls < 3 { refused() } else { Ok(calls) }
+        });
+        assert_eq!((r.unwrap(), waits, said.len()), (3, 2, 2), "found on the third read");
+
+        let mut waits = 0;
+        let r = retry_refused(3, &mut || waits += 1, &mut |_| {}, "9.9.9", refused);
+        let e = r.unwrap_err();
+        assert!(release::refused(&e) && format!("{e:#}").contains("press Update again") && waits == 2, "{e:#}");
+
+        let mut calls = 0;
+        let r: Result<u32> = retry_refused(3, &mut || {}, &mut |_| {}, "9.9.9", || {
+            calls += 1;
+            bail!("no network")
+        });
+        assert!(r.is_err() && calls == 1, "a failure to get the index is not retried here");
     }
 
     // What the panel may plant instead of a request: it is removed and logged, never
@@ -822,7 +1376,18 @@ mod tests {
     // watches the file has nothing to fire on).
     #[test]
     fn a_planted_request_is_removed_not_obeyed() {
-        let d = tmpdir("planted");
+        planted_request(false);
+    }
+
+    // A node's container plants the same things in its own directory, and its request is
+    // read the same way.
+    #[test]
+    fn a_planted_node_request_is_removed_not_obeyed() {
+        planted_request(true);
+    }
+
+    fn planted_request(node: bool) {
+        let d = tmpdir(if node { "planted-node" } else { "planted" });
         let dir = open(&d);
         let secret = d.join("secret");
         fs::write(&secret, "root's").unwrap();
@@ -842,10 +1407,10 @@ mod tests {
         for (what, make) in plant {
             let p = d.join("request");
             make(&p);
-            let got = take_request(&dir).unwrap();
+            let got = take_request(&dir, node).unwrap();
             assert!(matches!(got, Asked::Garbage(_)), "{what}: {got:?}");
             assert!(fs::symlink_metadata(&p).is_err(), "{what} stayed");
-            assert_eq!(take_request(&dir).unwrap(), Asked::Nothing, "{what}: it is looked at again");
+            assert_eq!(take_request(&dir, node).unwrap(), Asked::Nothing, "{what}: it is looked at again");
         }
         assert_eq!(fs::read_to_string(&secret).unwrap(), "root's");
         fs::remove_dir_all(&d).unwrap();
@@ -874,7 +1439,188 @@ mod tests {
             assert!(go.contains(tag), "the panel has no {tag}");
         }
         assert!(go.contains("enum:\"running,ok,failed\""));
+        // and the node's, which carries the same file in its health
+        let node = fs::read_to_string("../internal/nodeapi/types.go").unwrap();
+        for tag in ["`json:\"state\"", "`json:\"version\"`", "`json:\"from\"`", "`json:\"error,omitempty\"`", "`json:\"at\""] {
+            assert!(node.contains(tag), "the node has no {tag}");
+        }
+        assert!(node.contains("enum:\"running,ok,failed\""));
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    // The node's request is {"version": "X"} with X a release version, and nothing else of
+    // it is read; whatever else is in the file, it is gone at once.
+    #[test]
+    fn a_nodes_request_names_a_release_and_nothing_else() {
+        let d = tmpdir("node-requests");
+        let dir = open(&d);
+        let ask = |body: &str| {
+            fs::write(d.join("request"), body).unwrap();
+            let got = take_request(&dir, true).unwrap();
+            assert!(!d.join("request").exists(), "{body}: the request must go at once");
+            got
+        };
+        assert_eq!(take_request(&dir, true).unwrap(), Asked::Nothing);
+        for ok in ["0.5.0.2", "0.5.0.2-rc.1", "1.2.3", "0.4.5"] {
+            assert_eq!(ask(&format!(r#"{{"version":"{ok}"}}"#)), Asked::Version(ok.into()));
+        }
+        assert_eq!(ask(r#"{"version":"0.5.0.2","image":"evil/image@sha256:0","url":"http://evil"}"#), Asked::Version("0.5.0.2".into()));
+        let long = format!(r#"{{"version":"0.5.0.2-{}"}}"#, "x".repeat(80));
+        for bad in [
+            "",
+            "not json",
+            "[]",
+            "null",
+            r#""0.5.0.2""#,
+            "{}",
+            r#"{"version":null}"#,
+            r#"{"version":5}"#,
+            r#"{"version":["0.5.0.2"]}"#,
+            r#"{"version":""}"#,
+            r#"{"version":"dev"}"#,
+            r#"{"version":"v0.5.0.2"}"#,
+            r#"{"version":"latest"}"#,
+            r#"{"version":"0.5.0.2 "}"#,
+            r#"{"version":"0.5.0.2\n"}"#,
+            r#"{"version":"0.5"}"#,
+            r#"{"version":"0.5.0.2.1"}"#,
+            r#"{"version":"0.5.0.2/../x"}"#,
+            r#"{"version":"ghcr.io/x/y@sha256:aa"}"#,
+            r#"{"at":"2026-10-04T00:00:00Z"}"#,
+            r#"{"do":"addons"}"#,
+            long.as_str(),
+        ] {
+            assert!(matches!(ask(bad), Asked::Garbage(_)), "{bad}");
+        }
+        let big = format!(r#"{{"version":"0.5.0.2","pad":"{}"}}"#, "x".repeat(8192));
+        assert!(matches!(ask(&big), Asked::Garbage(_)), "larger than any request");
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    // Each side talks in the directory its container owns; the directory above it is what a
+    // stand-in for it is cleared from (clear_update_dir).
+    #[test]
+    fn a_nodes_directory_is_not_the_panels() {
+        assert_eq!(update_rel(false), "data/panel/update");
+        assert_eq!(update_rel(true), "data/node/update");
+        assert_eq!(update_rel(true).trim_end_matches("/update"), "data/node");
+        assert_eq!(update_rel(false).trim_end_matches("/update"), "data/panel");
+    }
+
+    // What a request for a release means, and what the daily timer of a node may do.
+    #[test]
+    fn a_server_never_goes_back_and_a_node_follows_its_panel() {
+        assert_eq!(upto_step("0.5.0.1", "0.5.0.2"), Step::Go);
+        assert_eq!(upto_step("0.4.5", "0.5.0.2"), Step::Go);
+        assert_eq!(upto_step("0.5.0.2", "0.5.0.2"), Step::Already);
+        assert_eq!(upto_step("0.4.5", "0.4.5.0"), Step::Already, "three numbers and four are one version");
+        assert_eq!(upto_step("0.5.0.2-rc.1", "0.5.0.2"), Step::Go);
+        for (current, upto) in [("0.5.0.3", "0.5.0.2"), ("0.6.0.0", "0.5.0.2"), ("0.5.0.2", "0.5.0.2-rc.1"), ("1.0.0", "0.9.9.9")] {
+            assert!(matches!(upto_step(current, upto), Step::Refuse(_)), "{current} to {upto}");
+        }
+        // a pre-release asked for is looked up on beta, whatever the node's channel says
+        assert_eq!(upto_channel(Channel::Stable, "0.5.0.3-rc.1"), Channel::Beta);
+        assert_eq!(upto_channel(Channel::Stable, "0.5.0.3"), Channel::Stable);
+        assert_eq!(upto_channel(Channel::Beta, "0.5.0.3"), Channel::Beta);
+
+        let node = |env: &str| Install { config: Config::from_env_text("x", &format!("MIRAI_MODE=node\n{env}")), node: true };
+        assert!(!auto_on(&node("")), "a node follows its panel unless its .env says otherwise");
+        assert!(!auto_on(&node("MIRAI_AUTO_UPDATE=0\n")));
+        for not_one in ["true", "yes", "on", "2", " 1", "1 "] {
+            assert!(!auto_on(&node(&format!("MIRAI_AUTO_UPDATE={not_one}\n"))), "{not_one:?}");
+        }
+        assert!(auto_on(&node("MIRAI_AUTO_UPDATE=1\n")));
+    }
+
+    // The chain a request makes: each hop chooses again from the version the last one left,
+    // never past the release asked for (see hop_by_hop_to_the_newest for the same chain
+    // without a limit).
+    #[test]
+    fn a_requested_chain_stops_at_the_release_asked_for() {
+        let signer = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let entry = |v: &str, channel: &str, from: &str| {
+            format!(
+                r#"{{"version":"{v}","channel":"{channel}","from":"{from}","manifest":"https://github.com/{}/releases/download/v{v}/manifest.json"}}"#,
+                release::REPO
+            )
+        };
+        let releases = [
+            ("0.4.5", "stable", "0.4.0"),
+            ("0.5.0.0", "stable", "0.4.5"),
+            ("0.5.0.1", "stable", "0.4.5"),
+            ("0.5.0.2", "stable", "0.5.0.1"),
+            ("0.5.0.3-rc.1", "beta", "0.5.0.2"),
+            ("0.6.0.0", "stable", "0.5.0.2"),
+        ];
+        let list: Vec<String> = releases.iter().map(|(v, c, from)| entry(v, c, from)).collect();
+        let versions: Vec<&str> = releases.iter().map(|(v, ..)| *v).collect();
+        let files = signed_files(&signer, &versions, &format!(r#"{{"schema":1,"releases":[{}]}}"#, list.join(",")));
+        let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
+        let key = signer.verifying_key();
+        // from a version, towards upto: what the hop is and what comes after it
+        let hop = |current: &str, upto: &str, channel: Channel| {
+            release::find_upto_with(current, upto_channel(channel, upto), upto, &[key], &fetch)
+                .map(|f| (f.manifest.version, f.newest, f.unreachable))
+        };
+        let step = |current: &str, upto: &str| hop(current, upto, Channel::Stable).unwrap();
+        // directly, when it can be
+        assert_eq!(step("0.5.0.1", "0.5.0.2"), ("0.5.0.2".into(), None, false));
+        // the highest reachable one up to it, and on from there, one release at a time
+        assert_eq!(step("0.4.5", "0.5.0.2"), ("0.5.0.1".into(), Some("0.5.0.2".into()), false));
+        assert_eq!(step("0.5.0.1", "0.6.0.0"), ("0.5.0.2".into(), Some("0.6.0.0".into()), false));
+        // never past it, though newer ones are out and reachable
+        assert_eq!(step("0.5.0.1", "0.5.0.2").0, "0.5.0.2");
+        assert_eq!(step("0.4.5", "0.5.0.0"), ("0.5.0.0".into(), None, false));
+        assert_eq!(step("0.4.5", "0.5.0.1").0, "0.5.0.1");
+        // a pre-release is asked for on beta whatever the node's channel is
+        assert_eq!(step("0.5.0.2", "0.5.0.3-rc.1"), ("0.5.0.3-rc.1".into(), None, false));
+        // not a release of the index, or of the channel: refused, and GitHub's latest is no way round it
+        for (current, upto) in [("0.5.0.1", "0.5.0.9"), ("0.5.0.1", "0.4.4"), ("0.5.0.1", "0.5.0.3-rc.2"), ("0.5.0.1", "0.7.0.0")] {
+            let err = hop(current, upto, Channel::Stable).unwrap_err();
+            assert!(format!("{err:#}").contains("not a release of this server's channel"), "{current} to {upto}: {err:#}");
+        }
+        // one that no release in between leads to
+        let (v, newest, unreachable) = step("0.3.9", "0.5.0.2");
+        assert!(unreachable && newest.as_deref() == Some("0.5.0.2"), "{v} {newest:?}");
+        // and the whole chain from 0.4.5 to 0.6.0.0, as the hops make it
+        let mut current = "0.4.5".to_owned();
+        let mut went = Vec::new();
+        loop {
+            let (version, newest, _) = step(&current, "0.6.0.0");
+            went.push(version.clone());
+            current = version;
+            if newest.is_none() {
+                break;
+            }
+        }
+        assert_eq!(went, ["0.5.0.1", "0.5.0.2", "0.6.0.0"]);
+    }
+
+    // The index is gone: GitHub's latest release answers only when it is the release asked for.
+    #[test]
+    fn without_the_index_only_the_release_asked_for_will_do() {
+        let signer = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let key = signer.verifying_key();
+        let mut files = signed_files(&signer, &["0.5.0.2"], r#"{"schema":1,"releases":[]}"#);
+        // no index at all, and a latest release
+        files.retain(|url, _| !url.contains("/updates/"));
+        let latest = release::latest_url();
+        let manifest = files[&format!("https://github.com/{}/releases/download/v0.5.0.2/manifest.json", release::REPO)].clone();
+        let sig = files[&format!("https://github.com/{}/releases/download/v0.5.0.2/manifest.json.sig", release::REPO)].clone();
+        files.insert(latest.clone(), manifest);
+        files.insert(format!("{latest}.sig"), sig);
+        let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
+        let got = release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &[key], &fetch).unwrap();
+        assert_eq!(got.manifest.version, "0.5.0.2");
+        assert!(got.fallback.is_some() && got.newest.is_none());
+        for upto in ["0.5.0.3", "0.5.0.1.1", "0.6.0.0"] {
+            let err = release::find_upto_with("0.5.0.1", Channel::Stable, upto, &[key], &fetch).unwrap_err();
+            assert!(format!("{err:#}").contains("not the mirai"), "{upto}: {err:#}");
+        }
+        // an index that is there but says nothing of the release is a refusal, not a reason to look elsewhere
+        let files = signed_files(&signer, &["0.5.0.2"], r#"{"schema":1,"releases":[]}"#);
+        let fetch = |url: &str, _: u64| -> Result<Option<Vec<u8>>> { Ok(files.get(url).cloned()) };
+        assert!(release::find_upto_with("0.5.0.1", Channel::Stable, "0.5.0.2", &[key], &fetch).is_err());
     }
 
     // The panel writes the channel; only the two exact words get through, and nothing the
@@ -918,7 +1664,7 @@ mod tests {
     // A node has no panel: its .env says, stable unless it says beta exactly.
     #[test]
     fn a_node_takes_its_channel_from_its_env() {
-        let node = |env: &str| Install { env: EnvFile::from_text("x", &format!("MIRAI_MODE=node\n{env}")), node: true };
+        let node = |env: &str| Install { config: Config::from_env_text("x", &format!("MIRAI_MODE=node\n{env}")), node: true };
         assert_eq!(channel(&node("")), Channel::Stable);
         assert_eq!(channel(&node("MIRAI_UPDATE_CHANNEL=beta\n")), Channel::Beta);
         assert_eq!(channel(&node("MIRAI_UPDATE_CHANNEL=Beta\n")), Channel::Stable);
@@ -974,7 +1720,7 @@ mod tests {
             let mut current = "0.4.4".to_owned();
             let mut went = Vec::new();
             for hop in 0.. {
-                let found = release::find_with(Some(&current), Channel::Stable, &signer.verifying_key(), &fetch).unwrap();
+                let found = release::find_with(Some(&current), Channel::Stable, &[signer.verifying_key()], &fetch).unwrap();
                 assert!(found.fallback.is_none(), "{:?}", found.fallback);
                 if !release::newer(&found.manifest.version, &current) {
                     return (went, After::Done);

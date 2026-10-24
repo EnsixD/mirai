@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
 )
 
 // ErrSubPortBusy: something else on the server holds the port.
@@ -19,10 +18,9 @@ var ErrSubPortBusy = errors.New("sub_port_busy")
 // runtime when Settings change it. The panel's port keeps serving subscriptions too, so
 // links already handed out keep working whatever the port becomes.
 type SubPort struct {
-	plain atomic.Bool
-	host  string
-	tls   *tls.Config // nil: plain HTTP (dev)
-	log   *slog.Logger
+	host string
+	tls  *tls.Config // nil: plain HTTP (dev)
+	log  *slog.Logger
 
 	mu      sync.Mutex
 	handler http.Handler
@@ -57,7 +55,7 @@ func (s *SubPort) Set(port int) error {
 			return fmt.Errorf("%w: %v", ErrSubPortBusy, err)
 		}
 		if s.tls != nil {
-			ln = &subscriptionListener{Listener: ln, config: s.tls, plain: &s.plain}
+			ln = tls.NewListener(ln, s.tls)
 		}
 		srv = httpServer(s.handler)
 		go func() {
@@ -96,24 +94,4 @@ func (s *SubPort) Error() string {
 
 func (s *SubPort) Close() {
 	_ = s.Set(0)
-}
-
-// New connections follow the selected protocol; existing connections can finish.
-func (s *SubPort) SetHTTP(on bool) { s.plain.Store(on) }
-
-type subscriptionListener struct {
-	net.Listener
-	config *tls.Config
-	plain  *atomic.Bool
-}
-
-func (s *subscriptionListener) Accept() (net.Conn, error) {
-	conn, err := s.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	if s.plain.Load() {
-		return conn, nil
-	}
-	return tls.Server(conn, s.config), nil
 }

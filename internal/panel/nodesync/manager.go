@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"maps"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -16,9 +18,12 @@ import (
 
 	"mirai/internal/nodeapi"
 	"mirai/internal/panel/domain"
+	"mirai/internal/panel/events"
+	"mirai/internal/panel/model"
 	"mirai/internal/panel/settings"
 	"mirai/internal/panel/store"
 	"mirai/internal/panel/store/db"
+	"mirai/internal/panel/torrent"
 )
 
 // LocalNode is the id of the panel's own node, reached over the unix socket.
@@ -30,6 +35,8 @@ type Target struct {
 	TLS  TLSSource
 	// Local is the panel's own node: only it may use the panel as its REALITY target.
 	Local bool
+	// Address is the node's API host:port, for the words of a failure; "" for the local node.
+	Address string
 }
 
 // Connect builds the client for a node row; the app knows the socket and certificates.
@@ -51,6 +58,7 @@ type Manager struct {
 	now     func() time.Time
 
 	nodesDirty chan struct{}
+	hub        *events.Hub // woken after a node was told down or up (liveness.go); nil: no one waits
 
 	mu        sync.Mutex
 	running   map[int64]*running
@@ -58,6 +66,7 @@ type Manager struct {
 	lastPrune time.Time
 
 	generation atomic.Uint64 // moves whenever a node is added, changed or removed
+	tlsGen     atomic.Uint64 // moves whenever a node took a certificate with another pin
 
 	// The snapshot the syncers share (snapshot.go): changes moves with every change it
 	// may not hold any more, batches counts the traffic batches stored per node.
@@ -66,6 +75,31 @@ type Manager struct {
 	snap    *snapshot
 	batchMu sync.Mutex
 	batches map[int64]uint64
+
+	// The torrent blocker's settings for the pullers (torrent.go), read again only after
+	// a change: the whole snapshot for one flag every few seconds kept PostgreSQL busy.
+	torMu      sync.Mutex
+	tor        torrent.Config
+	torChanges uint64
+	torRead    bool
+
+	// When recordDevices last wrote each user ("u<id>") and device ("d<user>/<ip>"); only
+	// the upkeep loop touches it.
+	touched map[string]int64
+
+	// storeInterval is storeEvery; tests that pull batch after batch set it to 0.
+	storeInterval time.Duration
+
+	// The nodes' last hellos (check.go).
+	helloMu sync.Mutex
+	hellos  map[int64]HelloView
+
+	// The panel's own addresses for the nodes' API locks (apilock.go), looked up at most
+	// every panelAddrsTTL; lookup is the resolver, which tests replace.
+	addrMu sync.Mutex
+	addrs  []string
+	addrAt time.Time
+	lookup func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 type running struct {
@@ -77,8 +111,11 @@ type running struct {
 
 func NewManager(st *store.Store, set *settings.Settings, pool *domain.Pool, connect Connect, log *slog.Logger, now func() time.Time) *Manager {
 	return &Manager{st: st, set: set, pool: pool, connect: connect, log: log, now: now,
-		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}, batches: map[int64]uint64{}}
+		nodesDirty: make(chan struct{}, 1), running: map[int64]*running{}, batches: map[int64]uint64{}, storeInterval: storeEvery}
 }
+
+// SetEvents connects the hub that wakes the addons reading the feed; call it before Run.
+func (m *Manager) SetEvents(h *events.Hub) { m.hub = h }
 
 func (m *Manager) Run(ctx context.Context) {
 	m.reconcile(ctx)
@@ -119,9 +156,20 @@ func (m *Manager) NodesChanged() {
 	signal(m.nodesDirty)
 }
 
-// Generation moves with every NodesChanged: what is built from the nodes (the subscription's
-// server list) is built again when it has moved.
-func (m *Manager) Generation() uint64 { return m.generation.Load() }
+// Generation moves with every NodesChanged, and when a node took a certificate with another
+// pin: what is built from the nodes (the subscription's server list) is built again when it
+// has moved.
+func (m *Manager) Generation() uint64 { return m.generation.Load() + m.tlsGen.Load() }
+
+// ServedPin is the pin of the certificate node id serves ("" for a public one), as of the
+// last state it took; ok is false while that is not known (no syncer, or none taken yet).
+func (m *Manager) ServedPin(id int64) (pin string, ok bool) {
+	s, found := m.Syncer(id)
+	if !found {
+		return "", false
+	}
+	return s.ServedPin()
+}
 
 // Syncers returns the running syncers ordered by node id.
 func (m *Manager) Syncers() []*Syncer {
@@ -281,6 +329,15 @@ func (m *Manager) Health(id int64) (HealthView, bool) {
 	return s.Health(), true
 }
 
+// HostPorts is what the node last said listens on its server; nil when it has not (domain.HostLookup).
+func (m *Manager) HostPorts(id int64) *nodeapi.HostPorts {
+	hv, ok := m.Health(id)
+	if !ok {
+		return nil
+	}
+	return hv.HostPorts()
+}
+
 // Validate runs mihomo's parser on an inbound on the node that will run it.
 func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRequest) error {
 	v, err := clientOf[interface {
@@ -292,6 +349,17 @@ func (m *Manager) Validate(ctx context.Context, id int64, req nodeapi.ValidateRe
 	return v.Validate(ctx, req)
 }
 
+// RequestUpdate asks a node to update to a release (nodeupdate has the rules).
+func (m *Manager) RequestUpdate(ctx context.Context, id int64, version string) error {
+	c, err := clientOf[interface {
+		RequestUpdate(context.Context, string) error
+	}](m, id)
+	if err != nil {
+		return err
+	}
+	return c.RequestUpdate(ctx, version)
+}
+
 // Activity reports which inbounds of a node each device reached lately.
 func (m *Manager) Activity(ctx context.Context, id int64) (nodeapi.Activity, error) {
 	c, err := clientOf[interface {
@@ -301,17 +369,6 @@ func (m *Manager) Activity(ctx context.Context, id int64) (nodeapi.Activity, err
 		return nodeapi.Activity{}, err
 	}
 	return c.Activity(ctx)
-}
-
-// Connections reads a node's connection log of the slots: where their traffic goes.
-func (m *Manager) Connections(ctx context.Context, id int64, slots []string) (nodeapi.Connections, error) {
-	c, err := clientOf[interface {
-		Connections(context.Context, []string) (nodeapi.Connections, error)
-	}](m, id)
-	if err != nil {
-		return nodeapi.Connections{}, err
-	}
-	return c.Connections(ctx, slots)
 }
 
 // CheckTarget tests a REALITY target from the node that dials it.
@@ -336,6 +393,28 @@ func (m *Manager) ScanTargets(ctx context.Context, id int64, req nodeapi.TargetS
 	return c.ScanTargets(ctx, req)
 }
 
+// SpeedTest runs a node's speed test of its own way to the internet.
+func (m *Manager) SpeedTest(ctx context.Context, id int64) (nodeapi.SpeedTest, error) {
+	c, err := clientOf[interface {
+		SpeedTest(context.Context) (nodeapi.SpeedTest, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.SpeedTest{}, err
+	}
+	return c.SpeedTest(ctx)
+}
+
+// ServiceRegions asks the sites from the node what they make of its address.
+func (m *Manager) ServiceRegions(ctx context.Context, id int64) (nodeapi.ServiceRegions, error) {
+	c, err := clientOf[interface {
+		ServiceRegions(context.Context) (nodeapi.ServiceRegions, error)
+	}](m, id)
+	if err != nil {
+		return nodeapi.ServiceRegions{}, err
+	}
+	return c.ServiceRegions(ctx)
+}
+
 // clientOf returns a node's client as T: methods beyond Node are optional, and tests
 // stand in for nodes with fakes that have only some of them.
 func clientOf[T any](m *Manager, id int64) (T, error) {
@@ -355,6 +434,7 @@ func clientOf[T any](m *Manager, id int64) (T, error) {
 // Call it after the node's row is deleted: its syncer stops first, so it cannot push the
 // old state back, and reconcile does not start it again.
 func (m *Manager) Retire(ctx context.Context, id int64) error {
+	m.forgetHello(id)
 	m.mu.Lock()
 	r, ok := m.running[id]
 	delete(m.running, id)
@@ -406,15 +486,24 @@ func (m *Manager) prune(ctx context.Context, now time.Time) {
 		m.log.Error("prune traffic", "err", err)
 		return
 	}
+	// The nodes' traffic is a view of the users': failing it must not keep the rest.
+	if err := m.st.Q.PruneNodeTrafficHourly(ctx, now.Add(-hourlyKeep).Unix()/3600); err != nil {
+		m.log.Error("prune node traffic", "err", err)
+	}
 	if err := m.st.Q.PruneDevices(ctx, now.Add(-deviceKeep).Unix()); err != nil {
 		m.log.Error("prune devices", "err", err)
+		return
+	}
+	if err := m.st.Q.PruneTorrentHits(ctx, now.Add(-torrentKeep).Unix()); err != nil {
+		m.log.Error("prune torrent hits", "err", err)
 		return
 	}
 	m.lastPrune = now
 }
 
 func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
-	users, err := m.st.Q.ListUsers(ctx)
+	// Every 30 s: only the users whose period may be over, and only what decides it.
+	users, err := m.st.Q.ListUsersToReset(ctx, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -424,7 +513,7 @@ func (m *Manager) resetPeriods(ctx context.Context, now time.Time) error {
 		switch u.ResetStrategy {
 		case "month_start":
 			// Monthly on the billing day, or the 1st without one.
-			monthStart := domain.MonthPeriodStart(now, u.BillingDay).Unix()
+			monthStart := model.MonthPeriodStart(now, u.BillingDay).Unix()
 			if start >= monthStart {
 				continue
 			}
@@ -496,7 +585,10 @@ func (m *Manager) maintainPool(ctx context.Context, now time.Time) {
 	m.SlotsChanged()
 }
 
-func (m *Manager) recordDevices(ctx context.Context, now time.Time) error {
+// touchOnline is how often an online user's online_at and a device's last_seen are written.
+const touchOnline = 2 * time.Minute
+
+func (m *Manager) recordDevices(ctx context.Context, now time.Time) (err error) {
 	online := m.Online()
 	if len(online) == 0 {
 		return nil
@@ -526,16 +618,45 @@ func (m *Manager) recordDevices(ctx context.Context, now time.Time) error {
 			devices = append(devices, device{r.UserID, ip})
 		}
 	}
-	if len(users) == 0 {
+	// "Seen" needs minutes, not the upkeep's 30 s: a user or a device written lately is left
+	// alone, and with nobody to write there is no transaction and no row lock at all.
+	at := now.Unix()
+	if m.touched == nil {
+		m.touched = map[string]int64{}
+	}
+	fresh := func(key string) bool {
+		return at-m.touched[key] < int64(touchOnline/time.Second) && at >= m.touched[key]
+	}
+	users = slices.DeleteFunc(users, func(u int64) bool { return fresh("u" + strconv.FormatInt(u, 10)) })
+	devices = slices.DeleteFunc(devices, func(d device) bool { return fresh("d" + strconv.FormatInt(d.user, 10) + "/" + d.ip) })
+	if len(users) == 0 && len(devices) == 0 {
 		return nil
+	}
+	// A device is upserted under its user's lock: its user is written then too.
+	for _, d := range devices {
+		if !slices.Contains(users, d.user) {
+			users = append(users, d.user)
+		}
 	}
 	slices.Sort(users)
 	slices.SortFunc(devices, func(a, b device) int { return cmp.Or(cmp.Compare(a.user, b.user), strings.Compare(a.ip, b.ip)) })
 	devices = slices.Compact(devices)
-	dp := db.UpsertDevicesParams{Now: now.Unix()}
+	dp := db.UpsertDevicesParams{Now: at}
 	for _, d := range devices {
 		dp.UserIds, dp.Ips = append(dp.UserIds, d.user), append(dp.Ips, d.ip)
 	}
+	defer func() {
+		if err == nil {
+			for _, u := range users {
+				m.touched["u"+strconv.FormatInt(u, 10)] = at
+			}
+			for _, d := range devices {
+				m.touched["d"+strconv.FormatInt(d.user, 10)+"/"+d.ip] = at
+			}
+			// What has not been written for a while is gone from the live view: forgotten.
+			maps.DeleteFunc(m.touched, func(_ string, t int64) bool { return at-t > int64(time.Hour/time.Second) })
+		}
+	}()
 	// Blind writes: READ COMMITTED. The users are locked in id order like the traffic
 	// batches lock them; a user deleted meanwhile is skipped, not an error for the rest.
 	return m.st.TxRC(ctx, func(q *db.Queries) error {

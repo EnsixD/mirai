@@ -8,6 +8,8 @@ package db
 import (
 	"context"
 	"database/sql"
+
+	"github.com/lib/pq"
 )
 
 const archiveTrafficPackage = `-- name: ArchiveTrafficPackage :execrows
@@ -25,7 +27,7 @@ func (q *Queries) ArchiveTrafficPackage(ctx context.Context, id int64) (int64, e
 const createPackagePayment = `-- name: CreatePackagePayment :one
 INSERT INTO payments (provider, payload, tg_id, kind, user_id, package_id, tariff_name, amount, currency, status, created_at)
 VALUES ($1, $2, $3, 'package', $4, $5, $6, $7, $8, 'pending', $9)
-RETURNING id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days
+RETURNING id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert
 `
 
 type CreatePackagePaymentParams struct {
@@ -74,6 +76,7 @@ func (q *Queries) CreatePackagePayment(ctx context.Context, arg CreatePackagePay
 		&i.AppliedAt,
 		&i.RefundedAt,
 		&i.TermDays,
+		&i.Revert,
 	)
 	return i, err
 }
@@ -180,6 +183,18 @@ func (q *Queries) CreateTrafficPackage(ctx context.Context, arg CreateTrafficPac
 	return i, err
 }
 
+const deleteGrantByPayment = `-- name: DeleteGrantByPayment :execrows
+DELETE FROM traffic_grants WHERE payment_id = $1
+`
+
+func (q *Queries) DeleteGrantByPayment(ctx context.Context, paymentID sql.NullInt64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteGrantByPayment, paymentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const endPeriodGrants = `-- name: EndPeriodGrants :exec
 UPDATE traffic_grants SET expires_at = CAST($1 AS BIGINT)
 WHERE user_id = $2 AND lifetime = 'period' AND remaining > 0
@@ -197,70 +212,24 @@ func (q *Queries) EndPeriodGrants(ctx context.Context, arg EndPeriodGrantsParams
 	return err
 }
 
-const findOpenPackagePayment = `-- name: FindOpenPackagePayment :one
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days FROM payments
-WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
-  AND status = 'pending' AND pay_url <> '' AND created_at > $5
-ORDER BY id DESC LIMIT 1
-`
-
-type FindOpenPackagePaymentParams struct {
-	TgID      int64
-	PackageID sql.NullInt64
-	Provider  string
-	UserID    sql.NullInt64
-	Since     int64
-}
-
-func (q *Queries) FindOpenPackagePayment(ctx context.Context, arg FindOpenPackagePaymentParams) (Payment, error) {
-	row := q.db.QueryRowContext(ctx, findOpenPackagePayment,
-		arg.TgID,
-		arg.PackageID,
-		arg.Provider,
-		arg.UserID,
-		arg.Since,
-	)
-	var i Payment
-	err := row.Scan(
-		&i.ID,
-		&i.Provider,
-		&i.Payload,
-		&i.ExternalID,
-		&i.TgID,
-		&i.Kind,
-		&i.UserID,
-		&i.TariffID,
-		&i.PackageID,
-		&i.TariffName,
-		&i.Amount,
-		&i.Currency,
-		&i.Status,
-		&i.Error,
-		&i.PayUrl,
-		&i.CreatedAt,
-		&i.PaidAt,
-		&i.AppliedAt,
-		&i.RefundedAt,
-		&i.TermDays,
-	)
-	return i, err
-}
-
 const findOpenPackagePayments = `-- name: FindOpenPackagePayments :many
-SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days FROM payments
+SELECT id, provider, payload, external_id, tg_id, kind, user_id, tariff_id, package_id, tariff_name, amount, currency, status, error, pay_url, created_at, paid_at, applied_at, refunded_at, term_days, revert FROM payments
 WHERE tg_id = $1 AND package_id = $2 AND provider = $3 AND kind = 'package' AND user_id = $4
-  AND status = 'pending' AND pay_url <> '' AND created_at > $5
+  AND (status = 'pending' AND pay_url <> '' AND created_at > $5
+    OR provider = 'balance' AND status IN ('paid', 'applied') AND created_at > $6)
 ORDER BY id DESC
 `
 
 type FindOpenPackagePaymentsParams struct {
-	TgID      int64
-	PackageID sql.NullInt64
-	Provider  string
-	UserID    sql.NullInt64
-	Since     int64
+	TgID        int64
+	PackageID   sql.NullInt64
+	Provider    string
+	UserID      sql.NullInt64
+	Since       int64
+	RepeatSince int64
 }
 
+// As FindOpenPayments: the open invoices, and the balance payments of just now.
 func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPackagePaymentsParams) ([]Payment, error) {
 	rows, err := q.db.QueryContext(ctx, findOpenPackagePayments,
 		arg.TgID,
@@ -268,6 +237,7 @@ func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPacka
 		arg.Provider,
 		arg.UserID,
 		arg.Since,
+		arg.RepeatSince,
 	)
 	if err != nil {
 		return nil, err
@@ -297,6 +267,7 @@ func (q *Queries) FindOpenPackagePayments(ctx context.Context, arg FindOpenPacka
 			&i.AppliedAt,
 			&i.RefundedAt,
 			&i.TermDays,
+			&i.Revert,
 		); err != nil {
 			return nil, err
 		}
@@ -336,7 +307,7 @@ func (q *Queries) GetTrafficPackage(ctx context.Context, id int64) (TrafficPacka
 }
 
 const getUserPool = `-- name: GetUserPool :one
-SELECT user_id, pool_id, traffic_limit, used_up, used_down FROM user_pools WHERE user_id = $1 AND pool_id = $2
+SELECT user_id, pool_id, traffic_limit, used_up, used_down, mode FROM user_pools WHERE user_id = $1 AND pool_id = $2
 `
 
 type GetUserPoolParams struct {
@@ -353,6 +324,7 @@ func (q *Queries) GetUserPool(ctx context.Context, arg GetUserPoolParams) (UserP
 		&i.TrafficLimit,
 		&i.UsedUp,
 		&i.UsedDown,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -518,6 +490,32 @@ func (q *Queries) ListUserGrants(ctx context.Context, userID int64) ([]TrafficGr
 	return items, nil
 }
 
+const moveGroupGrantsToMain = `-- name: MoveGroupGrantsToMain :exec
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id = ANY($1::bigint[]) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own')
+`
+
+// The traffic bought for a server group that is no longer the user's own limit (the group is
+// in the main traffic, without a limit, or closed) goes to the main traffic: it is paid for,
+// and a group that does not count it would leave it unspent and unseen.
+func (q *Queries) MoveGroupGrantsToMain(ctx context.Context, userIds []int64) error {
+	_, err := q.db.ExecContext(ctx, moveGroupGrantsToMain, pq.Array(userIds))
+	return err
+}
+
+const moveTariffGroupGrantsToMain = `-- name: MoveTariffGroupGrantsToMain :exec
+UPDATE traffic_grants g SET pool_id = NULL
+WHERE g.user_id IN (SELECT u.id FROM users u WHERE u.tariff_id = $1) AND g.pool_id IS NOT NULL AND g.remaining > 0
+  AND NOT EXISTS (SELECT 1 FROM user_pools up WHERE up.user_id = g.user_id AND up.pool_id = g.pool_id AND up.mode = 'own')
+`
+
+// MoveGroupGrantsToMain for every user of a tariff.
+func (q *Queries) MoveTariffGroupGrantsToMain(ctx context.Context, tariffID sql.NullInt64) error {
+	_, err := q.db.ExecContext(ctx, moveTariffGroupGrantsToMain, tariffID)
+	return err
+}
+
 const sumGrantsLeft = `-- name: SumGrantsLeft :many
 SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
 FROM traffic_grants
@@ -555,33 +553,34 @@ func (q *Queries) SumGrantsLeft(ctx context.Context, now int64) ([]SumGrantsLeft
 	return items, nil
 }
 
-const sumUserGrantsLeft = `-- name: SumUserGrantsLeft :many
+const sumUsersGrantsLeft = `-- name: SumUsersGrantsLeft :many
 SELECT user_id, CAST(COALESCE(pool_id, 0) AS BIGINT) AS pool_id, CAST(SUM(remaining) AS BIGINT) AS left_bytes
 FROM traffic_grants
-WHERE user_id = $1 AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST($2 AS BIGINT))
+WHERE user_id = ANY($1::bigint[]) AND remaining > 0 AND (expires_at IS NULL OR expires_at > CAST($2 AS BIGINT))
 GROUP BY user_id, COALESCE(pool_id, 0)
 `
 
-type SumUserGrantsLeftParams struct {
-	UserID int64
-	Now    int64
+type SumUsersGrantsLeftParams struct {
+	Ids []int64
+	Now int64
 }
 
-type SumUserGrantsLeftRow struct {
+type SumUsersGrantsLeftRow struct {
 	UserID    int64
 	PoolID    int64
 	LeftBytes int64
 }
 
-func (q *Queries) SumUserGrantsLeft(ctx context.Context, arg SumUserGrantsLeftParams) ([]SumUserGrantsLeftRow, error) {
-	rows, err := q.db.QueryContext(ctx, sumUserGrantsLeft, arg.UserID, arg.Now)
+// What is left of the active grants of the users in ids, per user and target.
+func (q *Queries) SumUsersGrantsLeft(ctx context.Context, arg SumUsersGrantsLeftParams) ([]SumUsersGrantsLeftRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumUsersGrantsLeft, pq.Array(arg.Ids), arg.Now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SumUserGrantsLeftRow{}
+	items := []SumUsersGrantsLeftRow{}
 	for rows.Next() {
-		var i SumUserGrantsLeftRow
+		var i SumUsersGrantsLeftRow
 		if err := rows.Scan(&i.UserID, &i.PoolID, &i.LeftBytes); err != nil {
 			return nil, err
 		}

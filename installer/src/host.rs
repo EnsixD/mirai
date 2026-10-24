@@ -20,33 +20,41 @@ net.core.wmem_max = 16777216
 
 pub fn tune() -> Result<()> {
     fs::write(SYSCTL, SYSCTL_CONF)?;
-    let ok = Command::new("sysctl").arg("--system").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("sysctl failed");
-    }
-    Ok(())
+    crate::system::run_quiet("sysctl", &["--system"])
 }
 
 /// HTTPS ports the panel moves a blocked inbound to on its own (internal/panel/autotune
 /// Pool): the node cannot open them in the firewall itself.
-pub const POOL: [u16; 12] = [2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443];
+pub const POOL: [u16; 15] = [2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443, 10443, 11443, 12443];
 
-/// The ufw rules of an install: the panel's port (or a node's API port), 80 for Let's
-/// Encrypt, 443 and the pool over TCP and UDP.
+/// The ufw rules of an install: the panel's port (or a node's API port), 80 for the
+/// certificate authority's HTTP-01 check, 443 and the pool over TCP and UDP. A node needs 80
+/// too: the panel orders its public certificate, and the CA comes to the node's port 80.
 pub fn rules(panel_port: Option<u16>, node_api: Option<u16>) -> Vec<String> {
     let mut r = Vec::new();
     if let Some(p) = panel_port {
         r.push(format!("{p}/tcp"));
-        r.push("80/tcp".into());
     }
     if let Some(p) = node_api {
         r.push(format!("{p}/tcp"));
     }
-    for p in std::iter::once(443).chain(POOL) {
-        r.push(format!("{p}/tcp"));
-        r.push(format!("{p}/udp"));
-    }
+    r.push(ACME_RULE.into());
+    r.extend(pool_rules());
     r
+}
+
+/// Port 80, where the certificate authority checks the server (HTTP-01).
+pub const ACME_RULE: &str = "80/tcp";
+
+/// What `mirai update` opens again on a server with ufw on: port 80 (nodes installed before
+/// they got public certificates lack it) and the pool, which may have grown.
+pub fn update_rules() -> Vec<String> {
+    std::iter::once(ACME_RULE.to_string()).chain(pool_rules()).collect()
+}
+
+/// 443 and the pool over TCP and UDP: what the protocols and the panel's moves need open.
+pub fn pool_rules() -> Vec<String> {
+    std::iter::once(443).chain(POOL).flat_map(|p| [format!("{p}/tcp"), format!("{p}/udp")]).collect()
 }
 
 /// Opens the rules when ufw is on; returns whether it was.
@@ -90,11 +98,7 @@ pub fn allow_from(ip: std::net::IpAddr, port: u16) -> Result<()> {
 }
 
 fn ufw(args: &[&str]) -> Result<()> {
-    let ok = Command::new("ufw").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("ufw {} failed", args.join(" "));
-    }
-    Ok(())
+    crate::system::run_quiet("ufw", args)
 }
 
 pub const BIN: &str = "/usr/local/bin/mirai";
@@ -162,10 +166,45 @@ fn version_of(path: &Path) -> Result<String> {
     Err(last.map_or_else(|| anyhow::anyhow!("the downloaded command does not run"), Into::into))
 }
 
-const UNITS: [(&str, &str); 4] = [
-    (
-        "mirai-update.service",
-        "[Unit]
+const UNIT_NAMES: [&str; 10] = [
+    "mirai-update.service",
+    "mirai-update.timer",
+    "mirai-update-request.service",
+    "mirai-update-request.path",
+    "mirai-doctor-request.service",
+    "mirai-doctor-request.path",
+    "mirai-restart-request.service",
+    "mirai-restart-request.path",
+    "mirai-terminal-request.service",
+    "mirai-terminal-request.path",
+];
+
+/// A node's own units: the firewall rule of its API port (apilock.rs), kept by a path unit on
+/// the node's request and a timer that lifts it when the panel stays away.
+const NODE_UNITS: [&str; 3] = ["mirai-apilock.service", "mirai-apilock.path", "mirai-apilock.timer"];
+
+/// The node's units that are enabled and started.
+const NODE_WATCHES: [&str; 2] = ["mirai-apilock.path", "mirai-apilock.timer"];
+
+/// The path units, which are enabled and started; the timer too.
+const WATCHES: [&str; 5] = [
+    "mirai-update.timer",
+    "mirai-update-request.path",
+    "mirai-doctor-request.path",
+    "mirai-restart-request.path",
+    "mirai-terminal-request.path",
+];
+
+/// The unit files of a panel or of a node: the same, except that each path unit watches
+/// the request of the one the server runs (the panel's Update button, or the panel asking
+/// a node over its API: data/panel/update/request and data/node/update/request; the same
+/// for a doctor run and a restart, hostreq.rs).
+fn units(panel: bool) -> Vec<(&'static str, String)> {
+    let (dir, from) = if panel { ("panel", "the panel") } else { ("node", "the panel this node belongs to") };
+    vec![
+        (
+            UNIT_NAMES[0],
+            "[Unit]
 Description=mirai: update when automatic updates are on
 After=docker.service network-online.target
 Wants=network-online.target
@@ -173,14 +212,16 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 # A oneshot unit has no time limit by default: an update stuck on a dead connection
-# would keep the timer from ever starting it again.
-TimeoutStartSec=45min
+# would keep the timer from ever starting it again. Two hours: a database move alone may
+# take an hour (DATABASE_LIMIT), with the pull and the backups around it.
+TimeoutStartSec=2h
 ExecStart=/usr/local/bin/mirai update --auto
-",
-    ),
-    (
-        "mirai-update.timer",
-        "[Unit]
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[1],
+            "[Unit]
 Description=mirai: look for an update once a day
 
 [Timer]
@@ -190,71 +231,288 @@ Persistent=true
 
 [Install]
 WantedBy=timers.target
-",
-    ),
-    (
-        "mirai-update-request.service",
-        "[Unit]
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[2],
+            "[Unit]
 Description=mirai: update asked for in the panel
 After=docker.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=45min
+TimeoutStartSec=2h
 ExecStart=/usr/local/bin/mirai update --requested
-",
-    ),
-    (
-        "mirai-update-request.path",
-        "[Unit]
-Description=mirai: wait for an update request from the panel
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[3],
+            format!(
+                "[Unit]
+Description=mirai: wait for an update request from {from}
 
 [Path]
-PathExists=/opt/mirai/data/panel/update/request
+PathExists=/opt/mirai/data/{dir}/update/request
 Unit=mirai-update-request.service
 
 [Install]
 WantedBy=paths.target
-",
-    ),
-];
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[4],
+            "[Unit]
+Description=mirai: run the server check the panel asked for
+After=docker.service
 
-/// Whether the unit files on disk are the ones this installer writes (a server updated by
-/// an older command has the older ones).
-pub fn units_current() -> bool {
-    UNITS.iter().all(|(name, text)| fs::read_to_string(format!("/etc/systemd/system/{name}")).is_ok_and(|have| have == *text))
+[Service]
+Type=oneshot
+# The checks that wait for the network end within a minute; a stuck one must not hold the
+# unit (and so the next request) for ever.
+TimeoutStartSec=5min
+ExecStart=/usr/local/bin/mirai doctor --requested
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[5],
+            format!(
+                "[Unit]
+Description=mirai: wait for a server check request from {from}
+
+[Path]
+PathExists=/opt/mirai/data/{dir}/doctor/request
+Unit=mirai-doctor-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[6],
+            "[Unit]
+Description=mirai: restart the containers as the panel asked
+After=docker.service
+
+[Service]
+Type=oneshot
+# It waits its turn behind an update (the one lock), which may take two hours.
+TimeoutStartSec=2h
+ExecStart=/usr/local/bin/mirai restart --requested
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[7],
+            format!(
+                "[Unit]
+Description=mirai: wait for a restart request from {from}
+
+[Path]
+PathExists=/opt/mirai/data/{dir}/restart/request
+Unit=mirai-restart-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+        (
+            UNIT_NAMES[8],
+            "[Unit]
+Description=mirai: one support terminal session, opened by the panel for a live grant
+
+[Service]
+Type=simple
+# The agent ends the session by itself (the grant's end, the panel letting go, 15 minutes
+# of silence). This is the backstop for one that is stuck: no grant lasts longer than 24
+# hours. systemd kills the whole cgroup when the agent ends, so a process the shell left
+# behind does not outlive the session.
+RuntimeMaxSec=25h
+TimeoutStartSec=1min
+KillMode=control-group
+SendSIGKILL=yes
+TimeoutStopSec=10s
+ExecStart=/usr/local/bin/mirai terminal-agent
+"
+            .into(),
+        ),
+        (
+            UNIT_NAMES[9],
+            format!(
+                "[Unit]
+Description=mirai: wait for a support terminal request from {from}
+
+[Path]
+PathExists=/opt/mirai/data/{dir}/support/terminal/request
+Unit=mirai-terminal-request.service
+
+[Install]
+WantedBy=paths.target
+"
+            ),
+        ),
+    ]
 }
 
-/// The update timer, and for a panel the watch on its update button.
+/// The units of a node alone (NODE_UNITS).
+fn node_units() -> Vec<(&'static str, String)> {
+    vec![
+        (
+            NODE_UNITS[0],
+            "[Unit]
+Description=mirai: the firewall rule of the node's API port, for its panel alone
+
+[Service]
+Type=oneshot
+# One nft run and a few small files; a stuck one must not hold the next request.
+TimeoutStartSec=1min
+ExecStart=/usr/local/bin/mirai api-lockdown --requested
+"
+            .into(),
+        ),
+        (
+            NODE_UNITS[1],
+            "[Unit]
+Description=mirai: wait for the node to ask for the rule of its API port
+
+[Path]
+PathExists=/opt/mirai/data/node/apilock/request
+Unit=mirai-apilock.service
+
+[Install]
+WantedBy=paths.target
+"
+            .into(),
+        ),
+        (
+            NODE_UNITS[2],
+            "[Unit]
+Description=mirai: lift the rule of the node's API port when the panel stays away
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=mirai-apilock.service
+
+[Install]
+WantedBy=timers.target
+"
+            .into(),
+        ),
+    ]
+}
+
+/// Whether the unit files on disk are the ones this installer writes for a panel or a node
+/// (a server updated by an older command has the older ones; a node before 0.5.0.2 has no
+/// request unit at all).
+pub fn units_current(panel: bool) -> bool {
+    units_current_in(Path::new("/etc/systemd/system"), panel, terminal_off())
+}
+
+/// The support terminal's units, which a server with MIRAI_SUPPORT_ACCESS=off in its settings
+/// does not have: nothing there can start a shell for an operator.
+const TERMINAL_UNITS: [&str; 2] = ["mirai-terminal-request.service", "mirai-terminal-request.path"];
+
+/// Whether the server's settings turn support access off (MIRAI_SUPPORT_ACCESS=off).
+fn terminal_off() -> bool {
+    crate::config::Config::load(crate::DIR).is_ok_and(|e| e.get("MIRAI_SUPPORT_ACCESS") == Some("off"))
+}
+
+/// The units a server should have: all of them, or all but the terminal's (terminal_off); a
+/// node's own on a node only.
+fn wanted(panel: bool, terminal_off: bool) -> Vec<(&'static str, String)> {
+    let mut all: Vec<_> = units(panel).into_iter().filter(|(name, _)| !(terminal_off && TERMINAL_UNITS.contains(name))).collect();
+    if !panel {
+        all.extend(node_units());
+    }
+    all
+}
+
+/// The units a server must not have: the terminal's when it is off, a node's on a panel.
+fn unwanted(panel: bool, terminal_off: bool) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if terminal_off {
+        out.extend(TERMINAL_UNITS);
+    }
+    if panel {
+        out.extend(NODE_UNITS);
+    }
+    out
+}
+
+fn units_current_in(dir: &Path, panel: bool, terminal_off: bool) -> bool {
+    wanted(panel, terminal_off).iter().all(|(name, text)| fs::read_to_string(dir.join(name)).is_ok_and(|have| have == *text))
+        && !unwanted(panel, terminal_off).iter().any(|name| dir.join(name).exists())
+}
+
+/// The update timer and the watches on the requests of a panel (its Update button, a server
+/// check, a restart) or of a node (the panel asking over the node API). Run again, it
+/// leaves a server as it is: the files are written only where they differ, the units
+/// that are enabled stay so.
 pub fn install_units(panel: bool) -> Result<()> {
     if !Path::new("/run/systemd/system").exists() {
         bail!("no systemd");
     }
-    for (name, text) in UNITS {
-        fs::write(format!("/etc/systemd/system/{name}"), text)?;
+    let off = terminal_off();
+    if off {
+        // Turned off after the units were installed: they go, a session running ends.
+        let _ = systemctl(&["disable", "--now", TERMINAL_UNITS[1], TERMINAL_UNITS[0]]);
     }
+    if panel && Path::new("/etc/systemd/system").join(NODE_UNITS[0]).exists() {
+        // A node's units on what is a panel now: they go before their files.
+        let _ = systemctl(&["disable", "--now", NODE_WATCHES[0], NODE_WATCHES[1], NODE_UNITS[0]]);
+    }
+    write_units(Path::new("/etc/systemd/system"), panel, off)?;
     systemctl(&["daemon-reload"])?;
-    systemctl(&["enable", "--now", "mirai-update.timer"])?;
-    if panel {
-        systemctl(&["enable", "--now", "mirai-update-request.path"])?;
+    let watches = WATCHES.iter().chain(if panel { &[][..] } else { &NODE_WATCHES[..] });
+    for name in watches {
+        if !(off && TERMINAL_UNITS.contains(name)) {
+            systemctl(&["enable", "--now", *name])?;
+        }
     }
     Ok(())
 }
 
+/// Writes the unit files into dir where they are not there or differ, and removes the ones
+/// the server must not have (unwanted); returns how many it wrote. A second run writes none.
+fn write_units(dir: &Path, panel: bool, terminal_off: bool) -> Result<usize> {
+    for name in unwanted(panel, terminal_off) {
+        match fs::remove_file(dir.join(name)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).with_context(|| format!("remove {name}")),
+            _ => {}
+        }
+    }
+    let mut written = 0;
+    for (name, text) in wanted(panel, terminal_off) {
+        let path = dir.join(name);
+        if fs::read_to_string(&path).is_ok_and(|have| have == text) {
+            continue;
+        }
+        fs::write(&path, text).with_context(|| format!("write {}", path.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
 pub fn remove_units() {
-    let _ = systemctl(&["disable", "--now", "mirai-update.timer", "mirai-update-request.path"]);
-    for (name, _) in UNITS {
+    let mut disable = vec!["disable", "--now"];
+    disable.extend(WATCHES);
+    disable.extend(NODE_WATCHES);
+    let _ = systemctl(&disable);
+    for name in UNIT_NAMES.iter().chain(&NODE_UNITS) {
         let _ = fs::remove_file(format!("/etc/systemd/system/{name}"));
     }
     let _ = systemctl(&["daemon-reload"]);
 }
 
 fn systemctl(args: &[&str]) -> Result<()> {
-    let ok = Command::new("systemctl").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
-    if !ok {
-        bail!("systemctl {} failed", args.join(" "));
-    }
-    Ok(())
+    crate::system::run_quiet("systemctl", args)
 }
 
 #[cfg(test)]
@@ -341,11 +599,165 @@ mod tests {
     // A oneshot unit has no time limit unless it is given one.
     #[test]
     fn update_units_have_a_time_limit() {
-        for (name, text) in UNITS {
-            if name.ends_with(".service") {
-                assert!(text.contains("TimeoutStartSec="), "{name}");
+        for panel in [true, false] {
+            for (name, text) in units(panel) {
+                if name.ends_with(".service") {
+                    assert!(text.contains("TimeoutStartSec="), "{name}");
+                }
             }
         }
+    }
+
+    // A panel's path units watch the panel's requests, a node's the node's: the same units,
+    // the path units apart.
+    #[test]
+    fn the_request_unit_watches_the_directory_of_what_the_server_runs() {
+        let (panel, node) = (units(true), units(false));
+        assert_eq!(panel.len(), UNIT_NAMES.len());
+        let unit = |all: &[(&str, String)], name: &str| all.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        for (kind, command) in [("update", "update --requested"), ("doctor", "doctor --requested"), ("restart", "restart --requested")] {
+            let path_unit = format!("mirai-{kind}-request.path");
+            let (p, n) = (unit(&panel, &path_unit), unit(&node, &path_unit));
+            assert!(p.contains(&format!("\nPathExists=/opt/mirai/data/panel/{kind}/request\n")), "{kind}");
+            assert!(n.contains(&format!("\nPathExists=/opt/mirai/data/node/{kind}/request\n")), "{kind}");
+            assert!(!p.contains("data/node") && !n.contains("data/panel"), "{kind}");
+            // both run the same command, which finds out by itself whose request it is
+            let service = unit(&node, &format!("mirai-{kind}-request.service"));
+            assert!(service.contains(&format!("ExecStart=/usr/local/bin/mirai {command}\n")), "{kind}");
+            assert!(n.contains(&format!("Unit=mirai-{kind}-request.service")), "{kind}");
+        }
+        for ((pn, pt), (nn, nt)) in panel.iter().zip(&node) {
+            assert_eq!(pn, nn);
+            assert!(UNIT_NAMES.contains(pn), "{pn}");
+            if !pn.ends_with(".path") {
+                assert_eq!(pt, nt, "{pn} is the same on a panel and on a node");
+            }
+        }
+        // what is enabled is a unit that exists
+        assert!(WATCHES.iter().all(|w| UNIT_NAMES.contains(w)));
+    }
+
+    // The terminal's request lies deeper (support/terminal/), the agent is the one fixed
+    // command, it runs apart from the others and is enabled like them.
+    #[test]
+    fn the_terminal_unit_watches_its_own_request_and_runs_the_agent() {
+        let (panel, node) = (units(true), units(false));
+        let unit = |all: &[(&str, String)], name: &str| all.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        let (p, n) = (unit(&panel, "mirai-terminal-request.path"), unit(&node, "mirai-terminal-request.path"));
+        assert!(p.contains("\nPathExists=/opt/mirai/data/panel/support/terminal/request\n") && !p.contains("data/node"));
+        assert!(n.contains("\nPathExists=/opt/mirai/data/node/support/terminal/request\n") && !n.contains("data/panel"));
+        assert!(p.contains("Unit=mirai-terminal-request.service"));
+        let service = unit(&panel, "mirai-terminal-request.service");
+        assert_eq!(service, unit(&node, "mirai-terminal-request.service"));
+        assert!(service.contains("\nExecStart=/usr/local/bin/mirai terminal-agent\n"));
+        // A session is a long-running process whose whole cgroup goes with it, and that is
+        // stopped at 25 hours whatever happens (a grant lasts 24 at most).
+        for want in ["Type=simple", "KillMode=control-group", "SendSIGKILL=yes", "RuntimeMaxSec=25h"] {
+            assert!(service.contains(want), "{want}");
+        }
+        assert!(WATCHES.contains(&"mirai-terminal-request.path"));
+    }
+
+    // Run again, the install leaves the files alone: a server that is up to date is not
+    // rewritten, one with an older unit set (no doctor or restart unit, a changed text) gets
+    // what is missing and nothing else.
+    #[test]
+    fn writing_the_units_is_idempotent() {
+        let d = tmpdir("write-units");
+        assert_eq!(write_units(&d, true, false).unwrap(), UNIT_NAMES.len());
+        assert_eq!(write_units(&d, true, false).unwrap(), 0, "a second run rewrites nothing");
+        assert!(units_current_in(&d, true, false));
+        // An installer of 0.5.1.0 wrote the update units only.
+        for gone in
+            ["mirai-doctor-request.service", "mirai-doctor-request.path", "mirai-restart-request.service", "mirai-restart-request.path"]
+        {
+            fs::remove_file(d.join(gone)).unwrap();
+        }
+        assert!(!units_current_in(&d, true, false), "an old install is not current: mirai update brings the new units");
+        assert_eq!(write_units(&d, true, false).unwrap(), 4);
+        assert!(units_current_in(&d, true, false));
+        // A changed file is put back, the others stay.
+        fs::write(d.join("mirai-doctor-request.path"), "[Path]\nPathExists=/tmp/x\n").unwrap();
+        assert_eq!(write_units(&d, true, false).unwrap(), 1);
+        assert!(units_current_in(&d, true, false));
+        // The same directory for a node: its own watches, the files that are the same stay.
+        let before = fs::read_to_string(d.join("mirai-update.timer")).unwrap();
+        assert_eq!(
+            write_units(&d, false, false).unwrap(),
+            4 + NODE_UNITS.len(),
+            "only the four path units differ, and the node's own are new"
+        );
+        assert_eq!(fs::read_to_string(d.join("mirai-update.timer")).unwrap(), before);
+        assert!(fs::read_to_string(d.join("mirai-restart-request.path")).unwrap().contains("data/node/restart/request"));
+        assert!(units_current_in(&d, false, false));
+        // Back to a panel: the node's own units go.
+        write_units(&d, true, false).unwrap();
+        assert!(NODE_UNITS.iter().all(|n| !d.join(n).exists()) && units_current_in(&d, true, false));
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    // The rule of a node's API port is a node's: its path unit watches the node's request, its
+    // timer lifts the rule within a minute of the panel staying away too long, both run the
+    // same fixed command and are enabled.
+    #[test]
+    fn the_api_lock_units_are_a_nodes() {
+        let (panel, node) = (wanted(true, false), wanted(false, false));
+        assert!(panel.iter().all(|(n, _)| !NODE_UNITS.contains(n)));
+        let unit = |name: &str| node.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+        assert!(unit("mirai-apilock.service").contains("\nExecStart=/usr/local/bin/mirai api-lockdown --requested\n"));
+        assert!(unit("mirai-apilock.service").contains("TimeoutStartSec="));
+        assert!(unit("mirai-apilock.path").contains("\nPathExists=/opt/mirai/data/node/apilock/request\nUnit=mirai-apilock.service\n"));
+        let timer = unit("mirai-apilock.timer");
+        assert!(
+            timer.contains("\nOnUnitActiveSec=1min\n")
+                && timer.contains("\nOnBootSec=1min\n")
+                && timer.contains("Unit=mirai-apilock.service")
+        );
+        assert!(NODE_WATCHES.iter().all(|w| NODE_UNITS.contains(w)));
+        for (name, text) in node_units() {
+            assert!(!text.contains("$") && !text.contains("%"), "{name}: nothing is expanded from outside");
+        }
+    }
+
+    // The units that answer a container run mirai with a flag nothing in a request can change.
+    #[test]
+    fn the_new_units_run_a_fixed_command() {
+        for panel in [true, false] {
+            for (name, text) in units(panel) {
+                if name.starts_with("mirai-doctor-request")
+                    || name.starts_with("mirai-restart-request")
+                    || name.starts_with("mirai-terminal-request")
+                {
+                    assert!(!text.contains("$") && !text.contains("%"), "{name}: nothing is expanded from outside");
+                }
+            }
+        }
+    }
+
+    // A server updated by an older command has the older units: a node with none of the
+    // request unit, a panel's file on a node, are not current; each mode's own are.
+    #[test]
+    fn units_are_current_for_the_mode_they_were_written_for() {
+        let d = tmpdir("units");
+        assert!(!units_current_in(&d, true, false) && !units_current_in(&d, false, false), "nothing written yet");
+        let write = |panel: bool| {
+            write_units(&d, panel, false).unwrap();
+        };
+        write(false);
+        assert!(units_current_in(&d, false, false));
+        assert!(!units_current_in(&d, true, false), "a node's units are not a panel's");
+        write(true);
+        assert!(units_current_in(&d, true, false) && !units_current_in(&d, false, false));
+        // a node of 0.5.0.1: the timer and the services, no path unit
+        write(false);
+        fs::remove_file(d.join("mirai-update-request.path")).unwrap();
+        assert!(!units_current_in(&d, false, false), "a node without the request unit gets it on its next update");
+        // an older text of the path unit
+        write(false);
+        let old = fs::read_to_string(d.join("mirai-update-request.path")).unwrap().replace("data/node/", "data/panel/");
+        fs::write(d.join("mirai-update-request.path"), old).unwrap();
+        assert!(!units_current_in(&d, false, false));
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
@@ -354,5 +766,27 @@ mod tests {
         assert_eq!(&r[..4], ["21355/tcp", "80/tcp", "443/tcp", "443/udp"]);
         assert!(r.contains(&"9443/udp".to_string()));
         assert_eq!(rules(None, Some(25305))[0], "25305/tcp");
+        // A node gets 80 for its certificate, also when its API port opens for the panel alone.
+        assert!(rules(None, Some(25305)).contains(&"80/tcp".to_string()));
+        assert!(rules(None, None).contains(&"80/tcp".to_string()));
+        let u = update_rules();
+        assert_eq!(u[0], "80/tcp");
+        assert!(u.contains(&"12443/udp".to_string()) && u.iter().all(|r| valid_rule(r)));
+    }
+
+    // MIRAI_SUPPORT_ACCESS=off: the terminal's units are neither written nor left behind.
+    #[test]
+    fn support_access_off_keeps_the_terminal_units_away() {
+        let d = std::env::temp_dir().join(format!("mirai-units-off-{}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        write_units(&d, true, false).unwrap();
+        assert!(d.join(TERMINAL_UNITS[1]).exists());
+        assert!(!units_current_in(&d, true, true), "turned off with the units still there");
+        assert_eq!(write_units(&d, true, true).unwrap(), 0, "the other units are the current ones already");
+        assert!(TERMINAL_UNITS.iter().all(|n| !d.join(n).exists()));
+        assert!(units_current_in(&d, true, true));
+        assert!(!units_current_in(&d, true, false), "turned on again: the terminal's units come back");
+        assert_eq!(write_units(&d, true, false).unwrap(), 2);
+        let _ = fs::remove_dir_all(&d);
     }
 }

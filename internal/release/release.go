@@ -1,12 +1,14 @@
 // Package release is the manifest every mirai release publishes next to its files: the
 // version, the image digest in GitHub Packages, the installer checksums and what changed.
-// The panel and the installer trust a manifest only with a valid signature from the
-// release key, whose public half is PublicKey.
+// The panel and the installer trust a manifest only with a valid signature from one of the
+// release keys, whose public halves are ReleaseKeys.
 package release
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +18,55 @@ import (
 	"time"
 )
 
-// PublicKey is the public half of the release signing key (raw Ed25519, base64). The
-// private half lives only in the RELEASE_SIGNING_KEY secret of the release workflow and
+// ReleaseKeys are the public halves of the release keys a build trusts (raw Ed25519, base64):
+// a manifest or the release index signed by any of them is the project's. The first signs the
+// releases now; the second is trusted ahead, so the release workflow can move to it and leave
+// no panel or installer behind (installer/src/release.rs and install.sh hold the same list).
+// The private halves live only in the RELEASE_SIGNING_KEY secret of the release workflow and
 // with the maintainer.
-const PublicKey = "OCOOJzn+R2XICC8i5jCInj4vwKyrSEa5PN5eigk8Mcg="
+var ReleaseKeys = []string{
+	"OCOOJzn+R2XICC8i5jCInj4vwKyrSEa5PN5eigk8Mcg=",
+	"OCOOJzn+R2XICC8i5jCInj4vwKyrSEa5PN5eigk8Mcg=",
+}
+
+// CatalogKey and CommunityKey are the public halves of the keys of the marketplace's signed
+// documents: the official catalog (getmikan/marketplace) and the registry of community addons
+// (getmikan/marketplace-community). They sign in a context of their own (SignIn), and neither
+// signs a release.
+const (
+	CatalogKey   = "Z4QfL07dI/IRReSe6Gr76UcxxPoy4i2GiClBv8RcNuo="
+	CommunityKey = "BKCw8Uf/qo3xSrYL+jwWyEThn/PXxHh0FiJvLDowmdc="
+)
+
+// TrustedKeys are ReleaseKeys decoded.
+func TrustedKeys() []ed25519.PublicKey {
+	out := make([]ed25519.PublicKey, 0, len(ReleaseKeys))
+	for _, k := range ReleaseKeys {
+		pub, err := Key(k)
+		if err != nil {
+			panic(err) // a constant of the build
+		}
+		out = append(out, pub)
+	}
+	return out
+}
+
+// MustKey is a public key of the build decoded; it panics on a bad one.
+func MustKey(b64 string) ed25519.PublicKey {
+	pub, err := Key(b64)
+	if err != nil {
+		panic(err)
+	}
+	return pub
+}
+
+// KeyFingerprint names the release keys a build trusts: the first 16 hex digits of the SHA-256
+// of ReleaseKeys, one per line. The support desk compares it with the official one; a build
+// that trusts another key, or one more, is not mirai's own.
+func KeyFingerprint() string {
+	sum := sha256.Sum256([]byte(strings.Join(ReleaseKeys, "\n")))
+	return hex.EncodeToString(sum[:8])
+}
 
 // Repo is where releases are published.
 const Repo = "EnsixD/mirai"
@@ -34,7 +81,6 @@ func JoinCommand(key string) string { return InstallCommand + " -s -- --join " +
 const LatestURL = "https://github.com/" + Repo + "/releases/latest/download/manifest.json"
 
 type Manifest struct {
-	Native       map[string]Asset  `json:"native,omitempty" doc:"Архив нативных Linux-бинарников по архитектуре"`
 	Version      string            `json:"version"`
 	MinInstaller string            `json:"min_installer,omitempty"`
 	Published    time.Time         `json:"published"`
@@ -73,12 +119,12 @@ func Sign(data []byte, key ed25519.PrivateKey) string {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(key, data))
 }
 
-// Parse checks the signature over the manifest's exact bytes, then decodes and checks it.
-func Parse(data []byte, sig string, pub ed25519.PublicKey) (Manifest, error) {
+// Parse checks the signature over the manifest's exact bytes, by any of keys, then decodes and
+// checks it.
+func Parse(data []byte, sig string, keys ...ed25519.PublicKey) (Manifest, error) {
 	var m Manifest
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(sig))
-	if err != nil || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, data, raw) {
-		return m, ErrSignature
+	if err := VerifyAny(data, sig, keys...); err != nil {
+		return m, err
 	}
 	// Unknown fields are ignored: the signature already vouches for every byte, and a
 	// manifest that gains a field must still be read by the panels already out there.
@@ -94,15 +140,8 @@ func Parse(data []byte, sig string, pub ed25519.PublicKey) (Manifest, error) {
 	if Newer(m.MinInstaller, m.Version) {
 		return m, errors.New("release: minimum installer is newer than the release")
 	}
-	if len(m.Native) == 0 || m.Image != "" || m.Digest != "" {
-		if !digestRe.MatchString(m.Digest) || !validImage(m.Image) {
-			return m, fmt.Errorf("release: image %s@%s", m.Image, m.Digest)
-		}
-	}
-	for arch, a := range m.Native {
-		if !sha256Re.MatchString(a.SHA256) || !strings.HasPrefix(a.URL, "https://") {
-			return m, fmt.Errorf("release: native asset for %s", arch)
-		}
+	if !digestRe.MatchString(m.Digest) || !validImage(m.Image) {
+		return m, fmt.Errorf("release: image %s@%s", m.Image, m.Digest)
 	}
 	for arch, a := range m.Installer {
 		if !sha256Re.MatchString(a.SHA256) || !strings.HasPrefix(a.URL, "https://") {
@@ -123,6 +162,17 @@ func validImage(image string) bool {
 	return ok && name != "" && !strings.Contains(name, "..") &&
 		strings.Trim(name, "abcdefghijklmnopqrstuvwxyz0123456789._/-") == ""
 }
+
+// MaxVersionLen is the longest version a request names: real ones are a dozen characters,
+// and what a node writes to its host's disk stays small.
+const MaxVersionLen = 64
+
+// Valid says whether v is a release version (1.2.3 or 1.2.3.4, a pre-release after a
+// hyphen allowed): not "dev", not a tag with a "v", not an address.
+func Valid(v string) bool { return len(v) <= MaxVersionLen && versionParts(v) != nil }
+
+// AtLeast says whether version a is b or later. A version that is not a release is never.
+func AtLeast(a, b string) bool { return Valid(a) && Valid(b) && !Newer(b, a) }
 
 // Newer says whether version a is later than b. A pre-release (1.2.3-rc.1) comes before
 // its release; "dev" and other unparsable versions are older than everything.
@@ -219,6 +269,17 @@ func comparePrerelease(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// NotesFor is the notes of version: its own section, or for a pre-release without one
+// (0.5.0.3-rc.1) the section of the release it leads to (0.5.0.3), so a beta needs no
+// changelog entry of its own.
+func NotesFor(changelog []byte, version string) map[string]string {
+	notes := Notes(changelog, version)
+	if base, _, pre := strings.Cut(version, "-"); pre && len(notes) == 0 {
+		notes = Notes(changelog, base)
+	}
+	return notes
 }
 
 // Notes takes a version's section out of CHANGELOG.md:

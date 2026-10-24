@@ -16,7 +16,7 @@ import (
 type Family string
 
 const (
-	FamilyMihomo  Family = "mihomo"  // Koala Clash, SlothClash, FlClash, Clash Verge, Clash Meta for Android, ClashFest…
+	FamilyMihomo  Family = "mihomo"  // Mirai, Kabosu, Koala Clash, SlothClash, FlClash, Clash Verge, Clash Meta for Android, ClashFest…
 	FamilyXray    Family = "xray"    // Happ, v2RayTun, INCY, v2rayNG, v2rayN…
 	FamilySingBox Family = "singbox" // Hiddify, Karing, NekoBox, sing-box…
 	FamilyStash   Family = "stash"
@@ -24,13 +24,16 @@ const (
 )
 
 // Families in the order the admin panel lists them.
-var Families = []Family{FamilyXray, FamilyMihomo, FamilySingBox, FamilyStash, FamilyOther}
+var Families = []Family{FamilyMihomo, FamilyXray, FamilySingBox, FamilyStash, FamilyOther}
 
 // App is a subscription client as its User-Agent describes it.
 type App struct {
 	Family Family
-	Core   Version // the mihomo core, when the app tells it or its version implies it
-	Legacy bool    // Hiddify: sing-box of 2024, before AnyTLS
+	Core   Version // the mihomo or sing-box core, when the app tells it or its version implies it
+	Legacy bool    // Hiddify before 4: sing-box of 2024, before AnyTLS
+	// Whole: the app runs a whole sing-box config, route and DNS too (the official SFA,
+	// SFI, SFM, SFT); the others take its outbounds and route by their own settings.
+	Whole bool
 }
 
 // Version is major.minor.patch; zero when unknown.
@@ -49,7 +52,12 @@ func (v Version) AtLeast(o Version) bool {
 
 var (
 	mihomoVersion = regexp.MustCompile(`(?:mihomo|clash[.-]?meta)/v?(\d+)\.(\d+)\.(\d+)`)
-	koalaVersion  = regexp.MustCompile(`koala-clash/v?(\d+)\.(\d+)\.(\d+)`)
+	// hiddifyVersion: "HiddifyNext/4.1.1 (android) like ClashMeta v2ray sing-box", or
+	// HiddifyNextX with the Xray core on.
+	hiddifyVersion = regexp.MustCompile(`hiddifynextx?/v?(\d+)\.(\d+)\.(\d+)`)
+	koalaVersion   = regexp.MustCompile(`koala-clash/v?(\d+)\.(\d+)\.(\d+)`)
+	// singboxVersion: the core the official sing-box apps, Karing and Husi name.
+	singboxVersion = regexp.MustCompile(`sing-box v?(\d+)\.(\d+)\.(\d+)`)
 )
 
 func versionOf(m []string) Version {
@@ -91,11 +99,19 @@ func DetectApp(userAgent string) App {
 	case strings.HasPrefix(ua, "stash"):
 		return App{Family: FamilyStash}
 	case has("hiddify"):
-		return App{Family: FamilySingBox, Legacy: true}
+		// Hiddify 4 (2026) runs a sing-box 1.13 fork; the 2.x of 2024 had no AnyTLS. One
+		// that does not say its version is taken for the old one.
+		m := hiddifyVersion.FindStringSubmatch(ua)
+		return App{Family: FamilySingBox, Legacy: m == nil || versionOf(m)[0] < 4}
 	case has("karing", "sing-box", "singbox", "nekobox", "nekoray", "husi", "throne", "deskbox", "inhive") ||
 		strings.HasPrefix(ua, "sfa") || strings.HasPrefix(ua, "sfi") || strings.HasPrefix(ua, "sfm") || strings.HasPrefix(ua, "sft"):
-		return App{Family: FamilySingBox}
-	case has("mihomo", "clash", "koala", "verge", "prizrak", "flowvy", "murge", "rabbit"):
+		// "SFA (sing-box 1.14.2; language en_US)"
+		a := App{Family: FamilySingBox, Whole: strings.HasPrefix(ua, "sfa") || strings.HasPrefix(ua, "sfi") || strings.HasPrefix(ua, "sfm") || strings.HasPrefix(ua, "sft")}
+		if m := singboxVersion.FindStringSubmatch(ua); m != nil {
+			a.Core = versionOf(m)
+		}
+		return a
+	case has("mihomo", "clash", "koala", "kabosu", "verge", "prizrak", "flowvy", "murge", "rabbit"):
 		a := App{Family: FamilyMihomo}
 		if m := mihomoVersion.FindStringSubmatch(ua); m != nil {
 			a.Core = versionOf(m)
@@ -122,6 +138,9 @@ var mihomoNewTypes = map[string]bool{"mieru": true, "sudoku": true, "trusttunnel
 // their core get a Gecko inbound.
 var geckoSince = Version{1, 19, 26}
 
+// getUplinkSince is the first mihomo client that uploads over XHTTP with GET.
+var getUplinkSince = Version{1, 19, 32}
+
 // Supports says whether the app can use an inbound.
 func (a App) Supports(n proto.Needs) bool {
 	switch a.Family {
@@ -140,13 +159,18 @@ func (a App) Supports(n proto.Needs) bool {
 		if n.Gecko && !(known && a.Core.AtLeast(geckoSince)) {
 			return false
 		}
+		// Uploading with GET came in 1.19.32; an older client sends POST and the CDN
+		// in front, the reason for GET, drops it.
+		if n.GetUplink && !(known && a.Core.AtLeast(getUplinkSince)) {
+			return false
+		}
 		return true
 	case FamilyXray: // no TUIC, AnyTLS or the mihomo-only types in Xray
 		if n.Gecko {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "shadowsocks":
 			return true
 		}
 	case FamilySingBox: // no XHTTP, VLESS Encryption or Gecko in sing-box
@@ -154,17 +178,17 @@ func (a App) Supports(n proto.Needs) bool {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "tuic", "shadowsocks":
 			return true
 		case "anytls":
 			return !a.Legacy
 		}
 	case FamilyStash:
-		if n.Gecko {
+		if n.Gecko || n.GetUplink {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks", "snell":
+		case "vless", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks", "snell":
 			return true
 		}
 	default: // what a share link can carry
@@ -172,7 +196,7 @@ func (a App) Supports(n proto.Needs) bool {
 			return false
 		}
 		switch n.Type {
-		case "vless", "vmess", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks":
+		case "vless", "trojan", "hysteria2", "tuic", "anytls", "shadowsocks":
 			return true
 		}
 	}

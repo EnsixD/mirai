@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 
+	"mirai/internal/nodeapi"
 	"mirai/internal/panel/settings"
 	"mirai/internal/panel/store/db"
 )
@@ -22,9 +22,21 @@ const (
 	PortInbound = "inbound"  // an inbound of the node
 	PortRelay   = "relay"    // the cascade relay other nodes leave through
 	PortPanel   = "panel"    // the panel's own HTTPS, on the panel's node
-	PortSub     = "sub"      // the subscription port: on the panel's node, and 443/80 on the subscription node
+	PortSub     = "sub"      // the subscription port, on the panel's node
 	PortNodeAPI = "node_api" // the node API the panel connects to, on a remote node
 )
+
+// HostLookup says what listens on a node's server now, as the node reported it; nil for a
+// node that has not (a node before 0.5.0.2, one that does not answer).
+type HostLookup func(node int64) *nodeapi.HostPorts
+
+// of is l's answer for node; a nil l knows nothing.
+func (l HostLookup) of(node int64) *nodeapi.HostPorts {
+	if l == nil {
+		return nil
+	}
+	return l(node)
+}
 
 // sshPort is never picked automatically: a relay or a moved inbound there would take
 // the admin's way in. An admin may still choose it.
@@ -34,7 +46,39 @@ const sshPort = 22
 // port, a cascade relay. HTTPS runs on these ports too (the alternative ports of CDNs),
 // so the traffic still looks like a web server's. The installer opens them in the
 // firewall.
-var PortPool = []int{2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443}
+var PortPool = []int{2053, 2083, 2087, 2096, 2443, 3443, 4443, 5443, 6443, 7443, 8443, 9443, 10443, 11443, 12443}
+
+// SpareLo and SpareHi bound the ports an automatic pick may take past PortPool when the
+// admin allows any port (settings.AnyPort): high ones, and below Linux's ephemeral range,
+// so a listener never meets the local port of an outgoing connection. The installer does
+// not open them in the firewall.
+const (
+	SpareLo = 20000
+	SpareHi = 32767
+)
+
+// maxSpare bounds the spare ports one pick lists: enough to choose from at random.
+const maxSpare = 64
+
+// PickPorts lists the ports an automatic pick may take over network, leaving out skip:
+// the free ones of PortPool; when none is and anyPort is on, free ones of the spare range.
+func (m PortMap) PickPorts(network string, anyPort bool, skip map[string]bool) []string {
+	var out []string
+	for _, p := range PortPool {
+		if port := strconv.Itoa(p); !skip[port] && m.Free(p, network) {
+			out = append(out, port)
+		}
+	}
+	if len(out) > 0 || !anyPort {
+		return out
+	}
+	for p := SpareLo; p <= SpareHi && len(out) < maxSpare; p++ {
+		if port := strconv.Itoa(p); !skip[port] && m.Free(p, network) {
+			out = append(out, port)
+		}
+	}
+	return out
+}
 
 // PortHolder is what holds a port. Name and ID are an inbound's; the other kinds are one
 // per node.
@@ -68,7 +112,10 @@ type portUse struct {
 
 // PortMap is every port taken on one node's server, over TCP and UDP. A Hysteria2
 // hopping range takes every port in it.
-type PortMap struct{ uses []portUse }
+type PortMap struct {
+	uses []portUse
+	host *nodeapi.HostPorts // what listens on the server, see WithHost
+}
 
 // NodePorts maps the ports of node: its inbounds, its cascade relay, and the panel's
 // port and the subscription port on the panel's own node or the node API's port on a
@@ -86,26 +133,8 @@ func NodePorts(ctx context.Context, q *db.Queries, node db.Node) (PortMap, error
 				m.add(PortHolder{Kind: s.kind}, strconv.Itoa(p), "tcp", false)
 			}
 		}
-		// Behind nginx the panel listens on a port of its own (2053 by default, the first
-		// of PortPool): a relay or an inbound there keeps the panel from starting.
-		if _, p, err := net.SplitHostPort(os.Getenv("MIRAI_PANEL_LISTEN")); err == nil {
-			m.add(PortHolder{Kind: PortPanel}, p, "tcp", false)
-		} else if os.Getenv("MIRAI_PANEL_LISTEN") == "" {
-			m.add(PortHolder{Kind: PortPanel}, "2053", "tcp", false)
-		}
-	} else {
-		if _, p, err := net.SplitHostPort(node.Address); err == nil {
-			m.add(PortHolder{Kind: PortNodeAPI}, p, "tcp", false)
-		}
-		// The subscription node passes 443 and 80 through to the panel (nodesync).
-		relay, _, err := settings.Get[int64](ctx, settings.New(q), settings.KeySubRelayNode)
-		if err != nil {
-			return PortMap{}, err
-		}
-		if relay == node.ID {
-			m.add(PortHolder{Kind: PortSub}, "443", "tcp", false)
-			m.add(PortHolder{Kind: PortSub}, "80", "tcp", false)
-		}
+	} else if _, p, err := net.SplitHostPort(node.Address); err == nil {
+		m.add(PortHolder{Kind: PortNodeAPI}, p, "tcp", false)
 	}
 	r, err := q.GetNodeRelay(ctx, node.ID)
 	switch {
@@ -124,8 +153,17 @@ func NodePorts(ctx context.Context, q *db.Queries, node db.Node) (PortMap, error
 	return m, nil
 }
 
+// WithHost adds what the node's server reports as listening, mirai's own listeners among
+// it. Only Free looks at it: a port another program holds is not one to pick, but
+// Busy, which refuses the admin's choice, names holders by what mirai knows of them, so
+// an inbound keeps its own port while it is listening on it.
+func (m PortMap) WithHost(h *nodeapi.HostPorts) PortMap {
+	m.host = h
+	return m
+}
+
 func (m *PortMap) add(h PortHolder, spec, network string, off bool) {
-	if lo, hi, ok := parsePort(spec); ok {
+	if lo, hi, ok := ParsePort(spec); ok {
 		m.uses = append(m.uses, portUse{holder: h, lo: lo, hi: hi, network: network, off: off})
 	}
 }
@@ -133,7 +171,7 @@ func (m *PortMap) add(h PortHolder, spec, network string, off bool) {
 // Busy returns what other than self listens on spec, a port or a range, over network.
 // A disabled inbound holds nothing: it is checked when it comes back on.
 func (m PortMap) Busy(spec, network string, self PortHolder) (PortHolder, bool) {
-	lo, hi, ok := parsePort(spec)
+	lo, hi, ok := ParsePort(spec)
 	if !ok {
 		return PortHolder{}, false
 	}
@@ -146,9 +184,10 @@ func (m PortMap) Busy(spec, network string, self PortHolder) (PortHolder, bool) 
 }
 
 // Free says whether an automatic pick may take port over network: nothing holds it, not
-// even a disabled inbound that may come back on, and it is not SSH's.
+// even a disabled inbound that may come back on, no other program listens on it (as far
+// as the node said), and it is not SSH's.
 func (m PortMap) Free(port int, network string) bool {
-	if port == sshPort {
+	if port == sshPort || m.host.Listens(network, port) {
 		return false
 	}
 	for _, u := range m.uses {
@@ -172,8 +211,9 @@ func CheckPort(ctx context.Context, q *db.Queries, node db.Node, spec, network s
 	return nil
 }
 
-// parsePort reads a port ("443") or a Hysteria2 hopping range ("20000-30000").
-func parsePort(spec string) (lo, hi int, ok bool) {
+// ParsePort reads a port ("443") or a Hysteria2 hopping range ("20000-30000"): the one
+// grammar of an inbound's port, for the panel, its checks and the subscription alike.
+func ParsePort(spec string) (lo, hi int, ok bool) {
 	a, b, isRange := strings.Cut(spec, "-")
 	lo, err := strconv.Atoi(a)
 	if err != nil || lo < 1 || lo > 65535 {
@@ -187,4 +227,14 @@ func parsePort(spec string) (lo, hi int, ok bool) {
 		return 0, 0, false
 	}
 	return lo, hi, true
+}
+
+// FirstPort is the port a client first dials for spec: the port itself, or the start of a
+// hopping range. 0 when spec is neither.
+func FirstPort(spec string) int {
+	lo, _, ok := ParsePort(spec)
+	if !ok {
+		return 0
+	}
+	return lo
 }

@@ -1,95 +1,145 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { Globe, Link2, ListFilter, ShieldCheck } from "lucide-react";
+import { ArrowDownToLine, Cpu, Globe, LayoutTemplate, LifeBuoy, Link2, Route, ShieldCheck } from "lucide-react";
 import { useSettings } from "../../../api/hooks";
-import { LangSwitch } from "../../../components/lang";
+import { useSupportMode } from "../../../api/support";
+import { SectionNav } from "../../../components/layout";
 import { QueryBoundary } from "../../../components/query";
-import { Columns, Tabs } from "../../../components/tabs";
 import { ThemeCard } from "../../../components/theme";
 import { PageHeader, Skeleton } from "../../../components/ui";
-import { t } from "../../../i18n";
-import { SETTINGS_TABS } from "../../search";
-import { AutoCard, LanguageCard, SalesCard, ServerCard, UpdatesCard } from "./general";
-import { ClashRulesCard, ClientRoutingCard } from "./rules";
-import { AccessCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
-import { AppsCard, DevicesCard, SubPortCard, SubscriptionCard } from "./subscription";
+import { t, type Key } from "../../../i18n";
+import { SETTINGS_PARTS, SETTINGS_TABS, type SettingsSearch } from "../../search";
+import { ClosedForSupport } from "../../support-closed";
+import { AppCard } from "./app";
+import { AuditCard } from "./audit";
+import { AutoCard, LanguageCard, ServiceCard, UpdatesCard } from "./general";
+import { ServerCheckCard } from "../node-check";
+import { GoalsCard } from "./goals";
+import { ImportCard, LegacyLinksCard } from "./import";
+import { ROUTING_PARTS, RoutingSection, type RoutingPart } from "./routing";
+import { AccessCard, ApiCard, CertificateCard, PasswordCard, SessionsCard, TwoFactorCard } from "./security";
+import { SupportCard } from "./support";
+import { AppsCard, DevicesCard, InactiveCard, SubPortCard, SubscriptionCard } from "./subscription";
+import { SubDomainCard } from "./sub-domain";
+import { SiteCard } from "./site";
+import { HappCard } from "./happ";
+import { SubPageSettings, type SubPagePart } from "./sub-page";
 
-const ICONS = { general: Globe, subscription: Link2, rules: ListFilter, security: ShieldCheck } as const;
+type Tab = SettingsSearch["tab"];
 
-/** Settings in five sections, one at a time; the section is in the URL, so a link opens it. */
+const ICONS = { general: Globe, subscription: Link2, page: LayoutTemplate, routing: Route, security: ShieldCheck, support: LifeBuoy, system: Cpu, import: ArrowDownToLine } as const;
+
+const PART_LABELS: Record<string, Key> = {
+  look: "settings.page.tab.look",
+  brand: "settings.page.tab.brand",
+  blocks: "settings.page.tab.blocks",
+  apps: "settings.page.tab.apps",
+  docs: "settings.page.tab.docs",
+  css: "settings.page.tab.css",
+  mode: "settings.routingParts.mode",
+  lists: "settings.routingParts.lists",
+  rules: "settings.routingParts.rules",
+  dns: "settings.routingParts.dns",
+  advanced: "settings.routingParts.advanced",
+  yaml: "settings.routingParts.yaml",
+};
+
+/**
+ * Settings in sections listed beside the content (a select on phones); the section and its
+ * part are in the URL, so a link opens them. Forms keep one readable width; the editors with
+ * a live preview take the whole column.
+ */
 export function SettingsPage() {
   const settings = useSettings();
-  const { tab } = useSearch({ from: "/_app/settings" });
+  // A support operator has no account of their own here: the credentials, the sessions and the keys are closed to them.
+  const operator = !!useSupportMode();
+  const { tab, part } = useSearch({ from: "/_app/settings" });
   const navigate = useNavigate({ from: "/settings" });
+  const go = (next: Tab, nextPart?: string) => void navigate({ search: { tab: next, part: nextPart }, replace: true });
+  // The routing opens where it is in use: the own YAML once there is one. An old link to the
+  // simple mode ("simple") opens the mode.
+  const routingPart: RoutingPart = ROUTING_PARTS.includes(part as RoutingPart) ? (part as RoutingPart) : settings.data?.sub_template.trim() && part !== "simple" ? "yaml" : "mode";
+  const pagePart: SubPagePart = (part as SubPagePart | undefined) ?? "look";
+  const shownPart = tab === "page" ? pagePart : tab === "routing" ? routingPart : undefined;
+  const wide = tab === "page" || tab === "routing";
   return (
     <>
-      <PageHeader title={t("nav.settings")} sub={t("settings.subtitle")} actions={<LangSwitch />} />
-      <Tabs
-        id="settings"
+      <PageHeader title={t("nav.settings")} sub={t("settings.subtitle")} />
+      <SectionNav
         label={t("settings.sections")}
-        tabs={SETTINGS_TABS.map((id) => ({ id, label: t(`settings.tabs.${id}`), icon: ICONS[id] }))}
+        sections={SETTINGS_TABS.map((id) => ({
+          id,
+          label: t(`settings.tabs.${id}`),
+          icon: ICONS[id],
+          parts: id in SETTINGS_PARTS ? SETTINGS_PARTS[id as keyof typeof SETTINGS_PARTS].map((p) => ({ id: p, label: t(PART_LABELS[p]!) })) : undefined,
+        }))}
         value={tab}
-        onChange={(next) => void navigate({ search: { tab: next }, replace: true })}
+        part={shownPart}
+        onChange={go}
+        narrow={!wide}
       >
-        <QueryBoundary query={settings} pending={<Skeleton style={{ height: 320, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
-          {(s) =>
-            tab === "general" ? (
-              <Columns
-                left={
+        {tab === "page" ? (
+          // The editor loads its own data and keeps its own draft.
+          <SubPageSettings section={pagePart} onSection={(p) => go("page", p)} />
+        ) : (
+          <QueryBoundary query={settings} pending={<Skeleton style={{ height: 320, borderRadius: 20 }} />} wrap={(state) => <section className="card glass">{state}</section>}>
+            {(s) =>
+              tab === "general" ? (
+                <>
+                  <ServiceCard s={s} />
+                  <LanguageCard s={s} />
+                  <ThemeCard />
+                  <AppCard s={s} />
+                </>
+              ) : tab === "subscription" ? (
+                <>
+                  <DevicesCard s={s} />
+                  <AppsCard s={s} />
+                  <HappCard s={s} />
+                  <SubscriptionCard s={s} />
+                  <InactiveCard s={s} />
+                  <SubDomainCard s={s} />
+                  <SubPortCard s={s} />
+                </>
+              ) : tab === "routing" ? (
+                <RoutingSection s={s} part={routingPart} onPart={(p) => go("routing", p)} />
+              ) : tab === "security" ? (
+                operator ? (
                   <>
-                    <ServerCard s={s} />
-                    <LanguageCard s={s} />
-                    <AutoCard s={s} />
-                  </>
-                }
-                right={
-                  <>
-                    <UpdatesCard />
-                    <SalesCard />
-                    <ThemeCard />
-                  </>
-                }
-              />
-            ) : tab === "subscription" ? (
-              <Columns
-                left={
-                  <>
-                    <SubscriptionCard s={s} />
-                    <DevicesCard s={s} />
-                  </>
-                }
-                right={
-                  <>
-                    <SubPortCard s={s} />
-                    <AppsCard s={s} />
-                  </>
-                }
-              />
-            ) : tab === "rules" ? (
-              <div className="flex w-full flex-col gap-4">
-                <ClientRoutingCard client="happ" s={s} />
-                <ClientRoutingCard client="incy" s={s} />
-                <ClashRulesCard s={s} />
-              </div>
-            ) : (
-              <Columns
-                left={
-                  <>
-                    <AccessCard s={s} />
+                    <ClosedForSupport />
                     <CertificateCard s={s} />
                   </>
-                }
-                right={
+                ) : (
                   <>
                     <PasswordCard />
                     <TwoFactorCard />
                     <SessionsCard />
+                    <AuditCard />
+                    <AccessCard s={s} />
+                    <SiteCard s={s} />
+                    <CertificateCard s={s} />
+                    <ApiCard />
                   </>
-                }
-              />
-            )
-          }
-        </QueryBoundary>
-      </Tabs>
+                )
+              ) : tab === "support" ? (
+                // Who may let a helper in is the admin's own business: an operator sees it closed.
+                operator ? <ClosedForSupport /> : <SupportCard />
+              ) : tab === "system" ? (
+                <>
+                  <UpdatesCard />
+                  <ServerCheckCard />
+                  <GoalsCard />
+                  <AutoCard s={s} />
+                </>
+              ) : (
+                <>
+                  <ImportCard />
+                  <LegacyLinksCard />
+                </>
+              )
+            }
+          </QueryBoundary>
+        )}
+      </SectionNav>
     </>
   );
 }

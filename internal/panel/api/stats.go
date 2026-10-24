@@ -9,8 +9,8 @@ import (
 
 	"mirai/internal/nodeapi"
 	"mirai/internal/panel/domain"
+	"mirai/internal/panel/store"
 	"mirai/internal/panel/store/db"
-	"mirai/internal/systemstats"
 )
 
 type TopUser struct {
@@ -51,19 +51,11 @@ type NodeView struct {
 }
 
 type nodeOutput struct{ Body NodeView }
-type systemOutput struct{ Body systemstats.Snapshot }
-
-var panelSystem = systemstats.New()
 
 func (h *handlers) registerStats() {
-	huma.Register(h.api, huma.Operation{OperationID: "stats-system", Method: http.MethodGet, Path: "/api/v1/stats/system", Summary: "CPU, RAM и диск сервера панели", Tags: []string{"stats"}}, h.systemHealth)
 	huma.Register(h.api, huma.Operation{OperationID: "stats-overview", Method: http.MethodGet, Path: "/api/v1/stats/overview", Summary: "Показатели дашборда", Tags: []string{"stats"}}, h.overview)
 	huma.Register(h.api, huma.Operation{OperationID: "stats-traffic", Method: http.MethodGet, Path: "/api/v1/stats/traffic", Summary: "Трафик сервера", Tags: []string{"stats"}}, h.serverTraffic)
 	huma.Register(h.api, huma.Operation{OperationID: "node-health", Method: http.MethodGet, Path: "/api/v1/node", Summary: "Состояние ноды", Tags: []string{"node"}}, h.nodeHealth)
-}
-
-func (h *handlers) systemHealth(_ context.Context, _ *struct{}) (*systemOutput, error) {
-	return &systemOutput{Body: panelSystem.Read()}, nil
 }
 
 func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, error) {
@@ -77,26 +69,8 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 		return nil, err
 	}
 	b.UsersTotal, b.UsersActive, b.Expiring7d = int(counts.Total), int(counts.Active+counts.Expiring), int(counts.Expiring)
-	visitors, err := h.d.Store.Q.CountTelegramVisitors(ctx)
-	if err != nil {
+	if b.Online, err = h.onlineUsers(ctx); err != nil {
 		return nil, err
-	}
-	b.UsersTotal += int(visitors)
-	if online := h.online(); len(online) > 0 {
-		// Online counts users: one with several bound devices has several slots online.
-		names := make([]string, 0, len(online))
-		for n := range online {
-			names = append(names, n)
-		}
-		owners, err := h.d.Store.Q.SlotOwners(ctx, names)
-		if err != nil {
-			return nil, err
-		}
-		seen := map[int64]bool{}
-		for _, o := range owners {
-			seen[o.UserID] = true
-		}
-		b.Online = len(seen)
 	}
 	today := now.Unix() / 86400
 	days, err := h.d.Store.Q.TotalTrafficDaily(ctx, today-1)
@@ -130,30 +104,38 @@ func (h *handlers) overview(ctx context.Context, _ *struct{}) (*overviewOutput, 
 	return out, nil
 }
 
+// trafficSince is where a range of the traffic charts starts: a day number for 30 days
+// (the charts then go by the day), an hour number otherwise (by the hour).
+func trafficSince(now time.Time, rng string) (daily bool, since int64) {
+	switch rng {
+	case "30d":
+		return true, now.Add(-30*24*time.Hour).Unix() / 86400
+	case "7d":
+		return false, now.Add(-7*24*time.Hour).Unix() / 3600
+	}
+	return false, now.Add(-24*time.Hour).Unix() / 3600
+}
+
 func (h *handlers) serverTraffic(ctx context.Context, in *rangeInput) (*trafficOutput, error) {
-	now := h.d.Now()
 	out := &trafficOutput{}
 	out.Body.Points = []TrafficPoint{}
-	if in.Range == "30d" {
-		rows, err := h.d.Store.Q.TotalTrafficDaily(ctx, now.Add(-30*24*time.Hour).Unix()/86400)
+	daily, since := trafficSince(h.d.Now(), in.Range)
+	if daily {
+		rows, err := h.d.Store.Q.TotalTrafficDaily(ctx, since)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
-			out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Day*86400, 0).UTC(), Up: r.Up, Down: r.Down})
+			out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Day * 86400), Up: r.Up, Down: r.Down})
 		}
 		return out, nil
 	}
-	span := 24 * time.Hour
-	if in.Range == "7d" {
-		span = 7 * 24 * time.Hour
-	}
-	rows, err := h.d.Store.Q.TotalTrafficHourly(ctx, now.Add(-span).Unix()/3600)
+	rows, err := h.d.Store.Q.TotalTrafficHourly(ctx, since)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range rows {
-		out.Body.Points = append(out.Body.Points, TrafficPoint{T: time.Unix(r.Hour*3600, 0).UTC(), Up: r.Up, Down: r.Down})
+		out.Body.Points = append(out.Body.Points, TrafficPoint{T: store.Time(r.Hour * 3600), Up: r.Up, Down: r.Down})
 	}
 	return out, nil
 }
@@ -183,4 +165,26 @@ func (h *handlers) nodeHealth(ctx context.Context, in *nodeHealthInput) (*nodeOu
 	}
 	out.Body = v
 	return out, nil
+}
+
+// onlineUsers is how many users have a connection now. It counts users: one with several
+// bound devices has several slots online.
+func (h *handlers) onlineUsers(ctx context.Context) (int, error) {
+	online := h.online()
+	if len(online) == 0 {
+		return 0, nil
+	}
+	names := make([]string, 0, len(online))
+	for n := range online {
+		names = append(names, n)
+	}
+	owners, err := h.d.Store.Q.SlotOwners(ctx, names)
+	if err != nil {
+		return 0, err
+	}
+	seen := map[int64]bool{}
+	for _, o := range owners {
+		seen[o.UserID] = true
+	}
+	return len(seen), nil
 }

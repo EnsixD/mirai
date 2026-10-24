@@ -156,7 +156,7 @@ func openPort(ctx context.Context, st *store.Store, in db.Inbound, stdout, stder
 
 func presetIDs() string {
 	var ids []string
-	for _, p := range presets.All {
+	for _, p := range presets.Offered() {
 		if p.ID != presets.Custom {
 			ids = append(ids, p.ID)
 		}

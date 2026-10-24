@@ -41,6 +41,9 @@ func TestTrialOncePerAccount(t *testing.T) {
 		u.ExpiresAt.Int64 != e.now.Add(time.Duration(trial.DurationDays)*24*time.Hour).Unix() {
 		t.Fatalf("trial user %+v on %+v", u, trial)
 	}
+	if u.Source != domain.UserFromTrial {
+		t.Fatalf("a trial user came from %q", u.Source)
+	}
 	links, err := e.st.Q.ListTgLinksOf(ctx, 901)
 	if err != nil || len(links) != 1 || links[0].ID != u.ID {
 		t.Fatalf("the trial is not linked to the account: %+v %v", links, err)
@@ -59,8 +62,8 @@ func TestTrialOncePerAccount(t *testing.T) {
 	}
 }
 
-// Any account can claim once, including existing subscribers and paying customers.
-func TestTrialAlsoAvailableToExistingAccounts(t *testing.T) {
+// Customers do not get a trial: an account with a subscription or a paid payment.
+func TestTrialIsForNewPeople(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	e.offerTrial()
@@ -70,18 +73,18 @@ func TestTrialAlsoAvailableToExistingAccounts(t *testing.T) {
 	must(t, err)
 	_, err = e.st.DB.ExecContext(ctx, "UPDATE payments SET status = 'applied' WHERE tg_id = 902")
 	must(t, err)
-	if _, err := e.s.Trial(ctx, 902); err != nil || e.s.TrialOpen(ctx, 902) {
+	if _, err := e.s.Trial(ctx, 902); !errors.Is(err, ErrTrialUsed) || e.s.TrialOpen(ctx, 902) {
 		t.Fatalf("a customer who paid: %v", err)
 	}
 	// An account with a subscription linked by the admin.
 	u, err := e.s.d.Users.Create(ctx, domain.CreateInput{Name: "linked", TariffID: e.sale.ID})
 	must(t, err)
 	must(t, e.st.Q.LinkTg(ctx, db.LinkTgParams{UserID: u.ID, TgID: 903, CreatedAt: e.now.Unix()}))
-	if _, err := e.s.Trial(ctx, 903); err != nil {
+	if _, err := e.s.Trial(ctx, 903); !errors.Is(err, ErrTrialUsed) {
 		t.Fatalf("an account with a subscription: %v", err)
 	}
-	if n, _ := e.st.Q.CountTrials(ctx); n != 2 {
-		t.Fatalf("trials counted: %d", n)
+	if n, _ := e.st.Q.CountTrials(ctx); n != 0 {
+		t.Fatalf("refused trials counted: %d", n)
 	}
 }
 
@@ -152,14 +155,14 @@ func TestTrialIsTheTariffWhole(t *testing.T) {
 	trial := e.offerTrial()
 	pool, err := e.st.Q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "trial-pool", CreatedAt: e.now.Unix()})
 	must(t, err)
-	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: trial.ID, PoolID: pool.ID, TrafficLimit: 1 << 20}))
+	must(t, e.st.Q.AddTariffPool(ctx, db.AddTariffPoolParams{TariffID: trial.ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: 1 << 20, Valid: true}}))
 	// No free slot: the first attempt hits domain.ErrNoSlots.
 	_, err = e.st.DB.ExecContext(ctx, "UPDATE slots SET state = 'assigned' WHERE state = 'free'")
 	must(t, err)
 	clock := func() time.Time { return e.now }
 	changes := &countChanges{}
 	svc := New(Deps{Store: e.st, Settings: e.s.d.Settings, Users: domain.NewUsers(e.st, domain.NewPool(e.st, clock), changes, clock),
-		Log: e.s.d.Log, Now: clock})
+		Log: e.s.d.Log, Now: clock, MaxLinks: 5})
 	u, err := svc.Trial(ctx, 906)
 	must(t, err)
 	if u.ResetStrategy != trial.ResetStrategy || u.SlotID.Int64 == 0 {

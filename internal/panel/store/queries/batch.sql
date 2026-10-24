@@ -134,6 +134,10 @@ DELETE FROM bound_devices WHERE user_id = ANY(sqlc.arg(ids)::bigint[]);
 -- name: DeleteUsers :exec
 DELETE FROM users WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
+-- name: SumUserTraffic :one
+-- Traffic of all users, all time.
+SELECT COALESCE(SUM(total_up), 0)::bigint AS up, COALESCE(SUM(total_down), 0)::bigint AS down FROM users;
+
 -- name: CountUserStates :one
 -- How many users are in each state as domain.State decides it (keep the two alike):
 -- disabled, expired, limited (past the base quota with no main grants left), expiring
@@ -194,3 +198,7 @@ SELECT * FROM inbound_events WHERE id > $1 ORDER BY id LIMIT 500;
 -- name: LockBuyerInvoices :exec
 -- The invoices of one Telegram account are checked and made one transaction at a time.
 SELECT pg_advisory_xact_lock(hashtextextended('mirai-invoice:' || CAST(sqlc.arg(tg_id) AS BIGINT), 0));
+
+-- name: CountBoundDevicesOf :many
+-- How many devices are bound to each of these users: the places they take.
+SELECT user_id, count(*) AS n FROM bound_devices WHERE user_id = ANY(sqlc.arg(ids)::bigint[]) GROUP BY user_id;

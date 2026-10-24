@@ -7,7 +7,7 @@ import (
 
 	"mirai/internal/panel/billing"
 	"mirai/internal/panel/store/db"
-	"mirai/internal/panel/tgbot"
+	"mirai/internal/panel/tgate"
 )
 
 // Settings that cannot be read are an error, never the defaults: a change built on the
@@ -47,7 +47,7 @@ func TestTelegramPatchIsAllOrNothing(t *testing.T) {
 	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "tg_token_format") {
 		t.Fatalf("bad token: %d %s", resp.StatusCode, body)
 	}
-	if raw, _ := h.st.Q.GetSetting(t.Context(), tgbot.KeyRoute); raw != "" {
+	if raw, _ := h.st.Q.GetSetting(t.Context(), tgate.KeyRoute); raw != "" {
 		t.Fatalf("route saved despite the refusal: %s", raw)
 	}
 }

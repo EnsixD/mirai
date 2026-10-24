@@ -24,6 +24,9 @@ type Ext struct {
 	Flow   string          `json:"flow,omitempty" yaml:"flow,omitempty"` // vless: xtls-rprx-vision
 	TLS    string          `json:"tls,omitempty" yaml:"tls,omitempty"`   // "node": use the node certificate
 	Client ClientOverrides `json:"client,omitzero" yaml:"client,omitempty"`
+	CDN    *CDN            `json:"cdn,omitempty" yaml:"cdn,omitempty"` // apps reach it through a CDN (cdn.go)
+	// SNI443: behind the node's SNI router on 443 (sni443.go).
+	SNI443 bool `json:"sni443,omitempty" yaml:"sni443,omitempty"`
 }
 
 // ClientOverrides change what clients get without touching the server side, e.g. a CDN
@@ -32,6 +35,7 @@ type ClientOverrides struct {
 	Server      string `json:"server,omitempty" yaml:"server,omitempty"`
 	Port        int    `json:"port,omitempty" yaml:"port,omitempty"`
 	SNI         string `json:"sni,omitempty" yaml:"sni,omitempty"`
+	Host        string `json:"host,omitempty" yaml:"host,omitempty"`               // HTTP Host of WebSocket and XHTTP; the server's when empty
 	Fingerprint string `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"` // uTLS profile (Fingerprints); the panel's default when empty
 }
 
@@ -68,11 +72,20 @@ type rule struct {
 // limits per user. The shared ones are the exception the admin opts into.
 var rules = map[string]rule{
 	"vless":  {keys: []string{"ws-path", "grpc-service-name", "xhttp-config", "reality-config", "mux-option", "decryption"}, network: "tcp", secured: true},
-	"vmess":  {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"trojan": {keys: []string{"ws-path", "grpc-service-name", "reality-config", "mux-option"}, network: "tcp", secured: true},
 	"hysteria2": {keys: []string{"obfs", "obfs-password", "obfs-min-packet-size", "obfs-max-packet-size", "max-idle-time", "alpn", "up", "down",
 		"ignore-client-bandwidth", "masquerade", "cwnd", "bbr-profile", "udp-mtu", "initial-stream-receive-window", "max-stream-receive-window",
 		"initial-connection-receive-window", "max-connection-receive-window"}, network: "udp", cert: true},
+	"tuic":        {keys: []string{"congestion-controller", "max-idle-time", "authentication-timeout", "alpn", "max-udp-relay-packet-size", "cwnd", "bbr-profile"}, network: "udp", cert: true},
+	"anytls":      {keys: []string{"padding-scheme"}, network: "tcp", cert: true},
+	"trusttunnel": {keys: []string{"congestion-controller", "cwnd", "bbr-profile"}, network: "tcp", cert: true},
+	"shadowquic": {keys: []string{"jls-upstream", "alpn", "quic-versions", "congestion-controller", "up", "down", "ignore-client-bandwidth",
+		"max-idle-time", "cwnd", "bbr-profile", "max-datagram-frame-size", "recv-window-conn", "recv-window", "disable-mtu-discovery"}, network: "udp"},
+	"mieru":       {keys: []string{"transport"}, network: "tcp"},
+	"shadowsocks": {keys: []string{"cipher", "password"}, network: "tcp", shared: true},
+	"sudoku": {keys: []string{"key", "aead-method", "padding-min", "padding-max", "table-type", "handshake-timeout", "enable-pure-downlink", "httpmask"},
+		network: "tcp", shared: true},
+	"snell": {keys: []string{"psk", "version", "obfs-opts"}, network: "tcp", shared: true},
 }
 
 // managed keys are set by the node; the rest of the forbidden list would let a template
@@ -171,6 +184,12 @@ func (t Template) Network() string {
 	return rules[t.Type()].network
 }
 
+// NodeCert says whether the listener runs on the node's certificate: Hysteria2, TUIC,
+// AnyTLS, TrustTunnel, and VLESS with TLS on the node certificate.
+func (t Template) NodeCert() bool {
+	return rules[t.Type()].cert || t.Ext().TLS == "node"
+}
+
 func (t Template) Ext() Ext {
 	var e Ext
 	if raw, ok := t[extKey]; ok {
@@ -198,9 +217,6 @@ func Validate(t Template, o Options) error {
 	if !ok {
 		return &Error{Code: "config_type", Field: "type", Detail: typ}
 	}
-	if typ != "vless" && typ != "vmess" && typ != "trojan" && typ != "hysteria2" {
-		return &Error{Code: "config_type", Field: "type", Detail: typ}
-	}
 	for k := range t {
 		switch {
 		case k == "type" || k == extKey:
@@ -216,7 +232,7 @@ func Validate(t Template, o Options) error {
 			return fail("config_key", extKey)
 		}
 		for k := range m {
-			if k != "flow" && k != "tls" && k != "client" {
+			if k != "flow" && k != "tls" && k != "client" && k != "cdn" && k != "sni443" {
 				return fail("config_key", extKey+"."+k)
 			}
 		}
@@ -224,6 +240,9 @@ func Validate(t Template, o Options) error {
 	ext := t.Ext()
 	if ext.TLS != "" && ext.TLS != "node" {
 		return fail("config_tls", extKey+".tls")
+	}
+	if ext.SNI443 && !CanSNI443(t) {
+		return fail("sni443_type", extKey+".sni443")
 	}
 	reality := t.section("reality-config")
 	if r.secured {
@@ -235,41 +254,29 @@ func Validate(t Template, o Options) error {
 		}
 	}
 	if reality != nil {
-		if t["ws-path"] != nil {
-			return fail("config_reality_ws", "ws-path")
-		}
 		if err := validateReality(reality, o); err != nil {
 			return err
 		}
 	}
 	if ext.Flow != "" {
-		return fail("config_flow", extKey+".flow")
+		if typ != "vless" || ext.Flow != "xtls-rprx-vision" || transport(t) != "tcp" {
+			return fail("config_flow", extKey+".flow")
+		}
 	}
 	if x := t.section("xhttp-config"); x != nil {
-		for k, v := range x {
-			if k == "path" || k == "mode" || k == "host" {
-				if _, ok := v.(string); !ok {
-					return fail("config_key", "xhttp-config."+k)
-				}
-				continue
-			}
-			if _, ok := xhttpExtraKeys[k]; !ok {
-				return fail("config_key", "xhttp-config."+k)
-			}
-			if k == "x-padding-obfs-mode" || k == "no-grpc-header" {
-				if _, ok := v.(bool); !ok {
-					return fail("config_key", "xhttp-config."+k)
-				}
-			} else if _, ok := v.(string); !ok {
-				return fail("config_key", "xhttp-config."+k)
-			}
-		}
 		if mode, _ := x["mode"].(string); mode != "" && mode != "stream-one" && mode != "stream-up" && mode != "packet-up" {
 			// "auto" hangs with mihomo v1.19.31 on both ends (S-01a).
 			return fail("config_xhttp_mode", "xhttp-config.mode")
 		}
 		if p, _ := x["path"].(string); p != "" && !strings.HasPrefix(p, "/") {
 			return fail("config_path", "xhttp-config.path")
+		}
+		// The same checks as the form's: a value the core refuses would only show when the
+		// node loads the inbound.
+		if tune, ok := XHTTPOf(t); ok {
+			if err := tune.check(); err != nil {
+				return err
+			}
 		}
 	}
 	if p := t.str("ws-path"); t["ws-path"] != nil && !strings.HasPrefix(p, "/") {
@@ -299,7 +306,12 @@ func Validate(t Template, o Options) error {
 	if o := ext.Client; o.Port < 0 || o.Port > 65535 {
 		return fail("config_key", extKey+".client.port")
 	}
-	return nil
+	if ext.CDN != nil {
+		if err := ext.CDN.check(t); err != nil {
+			return err
+		}
+	}
+	return validateExtra(t, o)
 }
 
 // transport is what a client dials over the secured channel.
@@ -378,7 +390,7 @@ func validateObfs(t Template) error {
 			return fail("config_obfs", "obfs")
 		}
 		return nil
-	case obfs != ObfsSalamander, t.str("obfs-password") == "":
+	case obfs != ObfsSalamander && obfs != ObfsGecko, t.str("obfs-password") == "":
 		return fail("config_obfs", "obfs")
 	case obfs == ObfsSalamander && (minSet || maxSet):
 		return fail("config_obfs_sizes", "obfs-min-packet-size")
@@ -413,7 +425,7 @@ func Obfs(t Template) string {
 // two share it); password fills one in when the template has none. Gecko's packet sizes
 // go away with Gecko.
 func SetObfs(t Template, obfs, password string) error {
-	if t.Type() != "hysteria2" || obfs != ObfsSalamander {
+	if t.Type() != "hysteria2" || (obfs != ObfsSalamander && obfs != ObfsGecko) {
 		return fail("config_obfs", "obfs")
 	}
 	t["obfs"] = obfs

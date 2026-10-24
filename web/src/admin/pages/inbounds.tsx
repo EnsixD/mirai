@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api, errorText, unwrap, type Inbound, type Schemas } from "../../api/client";
 import { qk, useInbounds, useNodes } from "../../api/hooks";
@@ -10,10 +10,12 @@ import { Button, EmptyState, PageHeader, Pill, Segmented, Skeleton } from "../..
 import { Switch } from "../../components/switch";
 import { t, tMaybe } from "../../i18n";
 import { ago, maskedAs } from "../../lib/format";
-import { nodeLabel } from "./nodes";
+import { nodeLabel } from "../../lib/node-label";
 import { hostPort, listenerError } from "./inbound/shared";
-import { AddModal } from "./inbound/add";
+import { AddDrawer } from "./inbound/add";
 import { EditDrawer } from "./inbound/edit";
+import { CopyDrawer } from "./inbound/copy";
+import { ExitBar } from "./inbound/exit-bar";
 
 export function InboundsPage() {
   const all = useInbounds();
@@ -29,7 +31,18 @@ export function InboundsPage() {
   const inbounds = useMemo(() => (all.data ?? []).filter((i) => !multi || i.node_id === nodeId), [all.data, multi, nodeId]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Inbound | null>(null);
+  const [copying, setCopying] = useState<Inbound | null>(null);
   const [removing, setRemoving] = useState<Inbound | null>(null);
+  // Ticked inbounds of the node on screen, for setting their exit at once.
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  const chosen = useMemo(() => inbounds.filter((i) => selected.has(i.id)), [inbounds, selected]);
+  const toggle = (id: number) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const allTicked = inbounds.length > 0 && chosen.length === inbounds.length;
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Schemas["PatchInboundInputBody"] }) => unwrap(api.PATCH("/api/v1/inbounds/{id}", { params: { path: { id } }, body })),
     onSettled: () => void qc.invalidateQueries({ queryKey: qk.inbounds }),
@@ -57,19 +70,31 @@ export function InboundsPage() {
           </Button>
         }
       />
-      <div className="banner warn">
-        <TriangleAlert size={18} className="shrink-0" aria-hidden />
-        <span>{t("inbounds.reconnectWarning")}</span>
-      </div>
       {multi && nodes.data ? (
-        <div className="mb-4">
-          <Segmented
-            value={String(nodeId)}
-            label={t("inbounds.node")}
-            options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))}
-            onChange={(v) => setNodeId(Number(v))}
-          />
-        </div>
+        nodes.data.length <= 4 ? (
+          <div className="max-w-full overflow-x-auto">
+            <Segmented value={String(nodeId)} label={t("inbounds.node")} options={nodes.data.map((n) => ({ value: String(n.id), label: nodeLabel(n) }))} onChange={(v) => {
+                setNodeId(Number(v));
+                setSelected(new Set());
+              }} />
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="inbounds-node" className="text-[13px] font-medium text-[var(--ink-700)]">
+              {t("inbounds.node")}
+            </label>
+            <select id="inbounds-node" className="input max-w-[320px]" value={nodeId} onChange={(e) => {
+                setNodeId(Number(e.target.value));
+                setSelected(new Set());
+              }}>
+              {nodes.data.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {nodeLabel(n)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )
       ) : null}
       <QueryBoundary
         query={all}
@@ -92,11 +117,19 @@ export function InboundsPage() {
               </EmptyState>
             </section>
           ) : (
+            <>
+            {inbounds.length > 1 ? (
+              <label className="-mb-1 flex w-fit cursor-pointer items-center gap-2 text-[13px] text-[var(--ink-700)]">
+                <input type="checkbox" className="check" checked={allTicked} onChange={() => setSelected(allTicked ? new Set() : new Set(inbounds.map((i) => i.id)))} />
+                {t("inbounds.exitBulk.all")}
+              </label>
+            ) : null}
             <div className="grid gap-4 lg:grid-cols-2">
               {inbounds.map((i, idx) => (
-                <section key={i.id} className="card glass reveal" style={{ "--i": idx } as React.CSSProperties}>
+                <section key={i.id} className={`card glass reveal flex flex-col${selected.has(i.id) ? " sel" : ""}`} style={{ "--i": idx } as React.CSSProperties}>
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <input type="checkbox" className="check mt-1 shrink-0" checked={selected.has(i.id)} onChange={() => toggle(i.id)} aria-label={t("inbounds.exitBulk.pick", { name: i.sub_name })} />
+                    <div className="min-w-0 flex-1">
                       <h2 className="font-display truncate text-lg font-medium tracking-tight">{i.sub_name}</h2>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-500)]">
                         <span>{i.preset === "custom" ? t("inbounds.customOf", { type: i.type }) : i.title}</span>
@@ -133,15 +166,22 @@ export function InboundsPage() {
                   {i.apps.length > 0 && i.apps.length < 5 ? (
                     <p className="mt-2 text-xs text-[var(--ink-500)]">{t("inbounds.appsLine", { list: i.apps.map((a) => tMaybe(`inbounds.apps.${a}`) ?? a).join(", ") })}</p>
                   ) : null}
+                  {i.enabled && i.node_cert && nodes.data?.find((n) => n.id === i.node_id)?.tls?.pinned ? (
+                    <p className="mt-2 text-xs text-[var(--ink-500)]">{t("certs.pinnedNote")}</p>
+                  ) : null}
                   {i.status === "error" && i.error ? (
                     <p className="mt-3 text-[13px] text-[var(--berry-600)]" role="alert">
                       {listenerError(i.error)}
                     </p>
                   ) : null}
                   <AutoInfo i={i} />
+                  <div className="flex-1" aria-hidden />
                   <div className="mt-4 flex gap-2 border-t border-[var(--hairline)] pt-4">
                     <Button size="sm" onClick={() => setEditing(i)}>
                       <Pencil size={16} aria-hidden /> {t("inbounds.configure")}
+                    </Button>
+                    <Button size="sm" onClick={() => setCopying(i)}>
+                      <Copy size={16} aria-hidden /> {t("inbounds.copy.button")}
                     </Button>
                     <Button size="sm" variant="danger" onClick={() => setRemoving(i)}>
                       <Trash2 size={16} aria-hidden /> {t("common.delete")}
@@ -150,11 +190,14 @@ export function InboundsPage() {
                 </section>
               ))}
             </div>
+            </>
           )
         }
       </QueryBoundary>
-      <AddModal open={adding} onOpenChange={setAdding} nodeId={nodeId} nodeName={multi && node ? nodeLabel(node) : undefined} />
+      <AddDrawer open={adding} onOpenChange={setAdding} nodeId={nodeId} nodeName={multi && node ? nodeLabel(node) : undefined} />
       <EditDrawer inbound={editing} onClose={() => setEditing(null)} />
+      <CopyDrawer inbound={copying} onClose={() => setCopying(null)} />
+      <ExitBar chosen={chosen} nodes={nodes.data ?? []} clear={() => setSelected(new Set())} />
       <Confirm
         open={!!removing}
         onOpenChange={(v) => !v && setRemoving(null)}

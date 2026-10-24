@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
+	"mirai/internal/acmechallenge"
 	"mirai/internal/nodeapi"
 	"mirai/internal/scan"
 )
@@ -22,18 +24,6 @@ var scanning sync.Mutex
 // access control, and on a remote node over TLS that only the panel's certificate opens.
 func Handler(e *Engine, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/update", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, http.StatusOK, e.updateStatus()) })
-	mux.HandleFunc("POST /v1/update", func(w http.ResponseWriter, r *http.Request) {
-		if !e.updateStatus().Supported {
-			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "update_unsupported", Message: "Native updater is not configured"})
-			return
-		}
-		if err := e.requestUpdate(); err != nil {
-			fail(w, log, err)
-			return
-		}
-		w.WriteHeader(http.StatusAccepted)
-	})
 	mux.HandleFunc("PUT /v1/state", func(w http.ResponseWriter, r *http.Request) {
 		var st nodeapi.DesiredState
 		if !decode(w, r, &st) {
@@ -82,10 +72,58 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Health())
 	})
+	mux.HandleFunc("POST /v1/update", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.UpdateRequest
+		// A request is one short version: nothing here is as large as the other calls' bodies.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, nodeapi.Error{Code: "bad_request", Message: err.Error()})
+			return
+		}
+		switch err := e.RequestUpdate(req.Version); {
+		case errors.Is(err, ErrBadVersion):
+			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_version", Message: "version must be a release version like 0.5.0.2"})
+		case err != nil:
+			log.Error("update request", "err", err)
+			writeJSON(w, http.StatusInternalServerError, nodeapi.Error{Code: "update_failed", Message: "the request could not be written"})
+		default:
+			w.WriteHeader(http.StatusAccepted)
+		}
+	})
+	// The panel orders the node's certificate; the CA asks for the token on the node's port
+	// 80, which is held only while a token is pending.
+	mux.HandleFunc("PUT /v1/acme/challenge/{token}", func(w http.ResponseWriter, r *http.Request) {
+		var req nodeapi.ChallengeRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, nodeapi.Error{Code: "bad_request", Message: err.Error()})
+			return
+		}
+		token := r.PathValue("token")
+		if !acmechallenge.ValidToken(token) || !acmechallenge.ValidKeyAuth(token, req.KeyAuth) {
+			writeJSON(w, http.StatusBadRequest, nodeapi.Error{Code: "bad_request", Message: "not an ACME token and key authorization"})
+			return
+		}
+		var be *acmechallenge.BusyError
+		switch err := e.Challenge.Present(token, req.KeyAuth); {
+		case errors.As(err, &be):
+			log.Warn("acme challenge: the port is held by another program", "addr", be.Addr, "holder", be.Holder)
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: nodeapi.CodePort80Busy, Message: be.Holder})
+		case errors.Is(err, acmechallenge.ErrTooMany):
+			writeJSON(w, http.StatusTooManyRequests, nodeapi.Error{Code: nodeapi.CodeTooManyChallenges, Message: "too many challenges at once"})
+		case err != nil:
+			log.Error("acme challenge", "err", err)
+			writeJSON(w, http.StatusInternalServerError, nodeapi.Error{Code: "challenge_failed", Message: err.Error()})
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	mux.HandleFunc("DELETE /v1/acme/challenge/{token}", func(w http.ResponseWriter, r *http.Request) {
+		e.Challenge.CleanUp(r.PathValue("token"))
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /v1/warp", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
 		defer cancel()
-		writeJSON(w, http.StatusOK, e.WarpStatus(ctx))
+		writeJSON(w, http.StatusOK, e.WarpStatus(ctx, r.URL.Query().Get("force") == "1"))
 	})
 	mux.HandleFunc("GET /v1/probe", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 18*time.Second)
@@ -97,15 +135,40 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
+	mux.HandleFunc("POST /v1/diagnose", diagnoseHandler(e))
+	mux.HandleFunc("GET /v1/logs", logsHandler(e))
+	mux.HandleFunc("POST /v1/doctor", doctorHandler(e))
+	mux.HandleFunc("POST /v1/restart", restartHandler(e))
+	mux.HandleFunc("POST /v1/terminal", terminalHandler(e))
+	mux.HandleFunc("GET /v1/recordings", recordingsHandler(e))
+	mux.HandleFunc("GET /v1/recordings/{name}", recordingHandler(e))
+	mux.HandleFunc("POST /v1/speedtest", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		res, err := e.SpeedTest(ctx)
+		if errors.Is(err, ErrSpeedTestBusy) {
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "speed_test_busy", Message: "a speed test is running"})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
+	mux.HandleFunc("POST /v1/regions", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 40*time.Second)
+		defer cancel()
+		res, err := e.ServiceRegions(ctx)
+		if errors.Is(err, ErrRegionsBusy) {
+			writeJSON(w, http.StatusConflict, nodeapi.Error{Code: "regions_busy", Message: "the sites are being asked already"})
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	})
 	mux.HandleFunc("GET /v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, e.Reg.Activity())
 	})
-	mux.HandleFunc("POST /v1/connections", func(w http.ResponseWriter, r *http.Request) {
-		var req nodeapi.ConnectionsRequest
-		if !decode(w, r, &req) {
-			return
-		}
-		writeJSON(w, http.StatusOK, e.Reg.Connections(req.Slots))
+	mux.HandleFunc("GET /v1/torrents", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+		writeJSON(w, http.StatusOK, e.Reg.TorrentHits(q.Get("epoch"), after))
 	})
 	mux.HandleFunc("POST /v1/targets/check", func(w http.ResponseWriter, r *http.Request) {
 		var req nodeapi.TargetCheckRequest
@@ -131,13 +194,19 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 			return
 		}
 		defer scanning.Unlock()
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		took := nodeapi.ScanTime
+		if req.Wide {
+			took = nodeapi.WideScanTime
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), took)
 		defer cancel()
 		limit := req.Limit
 		if limit <= 0 || limit > 32 {
 			limit = 12
 		}
-		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, e.TargetOptions())
+		o := e.TargetOptions()
+		o.Wide = req.Wide
+		res, scanned, err := scan.Neighbors(ctx, req.IP, limit, o)
 		if err != nil && ctx.Err() == nil {
 			writeJSON(w, http.StatusUnprocessableEntity, nodeapi.Error{Code: "bad_request", Message: err.Error()})
 			return
@@ -148,6 +217,11 @@ func Handler(e *Engine, log *slog.Logger) http.Handler {
 		writeJSON(w, http.StatusOK, nodeapi.TargetScan{Scanned: scanned, Results: res})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Over TLS only the panel's pinned certificate gets this far: the lock learns where
+		// the panel is from it (apilock.go). The unix socket is the panel's own node's.
+		if r.TLS != nil && e != nil {
+			e.PanelContact(r.RemoteAddr)
+		}
 		if r.Method == http.MethodConnect {
 			connectTunnel(w, r)
 			return

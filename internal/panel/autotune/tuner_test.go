@@ -118,14 +118,17 @@ func setup(t *testing.T) *env {
 	return e
 }
 
-// device is the user's device the node sees.
-const device = "198.51.100.20"
+// device is the user's device the node sees; laptop is another of theirs, on another
+// network: one network alone is never a block.
+const device, laptop = "198.51.100.20", "192.0.2.80"
 
 // refreshProfile: the device fetched the subscription just now.
 func (e *env) refreshProfile(t *testing.T) {
 	t.Helper()
-	if err := e.st.Q.RecordSubFetch(e.ctx, db.RecordSubFetchParams{UserID: e.user, Ip: device, FetchedAt: e.now.Unix() + 1}); err != nil {
-		t.Fatal(err)
+	for _, ip := range []string{device, laptop} {
+		if err := e.st.Q.RecordSubFetch(e.ctx, db.RecordSubFetchParams{UserID: e.user, Ip: ip, FetchedAt: e.now.Unix() + 1}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -149,7 +152,7 @@ func (e *env) activity() {
 	for _, n := range e.reaching {
 		seen[n] = e.now.Add(-time.Minute).Unix()
 	}
-	e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: e.slot, IP: device, Seen: seen}}}
+	e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: e.slot, IP: device, Seen: seen}, {Slot: e.slot, IP: laptop, Seen: seen}}}
 }
 
 func (e *env) step(t *testing.T, d time.Duration) {
@@ -207,7 +210,7 @@ func TestMovesABlockedPortAfterHold(t *testing.T) {
 	e.reaches("hysteria2", "tuic", "vless-vision")
 	e.step(t, 0)
 	s, ok := e.tn.Status(x.ID)
-	if !ok || !s.CutOff || s.Blocked != 1 || e.inbound(t, "vless-xhttp").Port != "443" {
+	if !ok || !s.CutOff || s.Blocked != 2 || e.inbound(t, "vless-xhttp").Port != "443" {
 		t.Fatalf("cut off, but not moved yet: %+v", s)
 	}
 	e.reaches("hysteria2", "tuic", "vless-vision")
@@ -312,6 +315,31 @@ func TestReplacesADeadTargetOnly(t *testing.T) {
 	}
 }
 
+// A dead target behind a proxy is shown, never replaced: the proxy may route by the site.
+func TestDeadTargetBehindAProxyStays(t *testing.T) {
+	e := setup(t)
+	every := DefaultOptions().CheckEvery
+	vision := e.inbound(t, "vless-vision")
+	dead := presets.DefaultDest
+	e.nodes.targets[dead] = nodeapi.TargetResult{Dest: dead, Error: "timeout"}
+	e.nodes.found = []nodeapi.TargetResult{good("203.0.113.44:443", "shop.example.org")}
+	if err := e.st.Q.SetInboundListen(e.ctx, db.SetInboundListenParams{Listen: "127.0.0.1", ID: vision.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.Q.SetInboundAuto(e.ctx, db.SetInboundAutoParams{AutoPort: 0, AutoSni: 1, ID: vision.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []time.Duration{0, every, every, every} {
+		e.step(t, d)
+	}
+	if got := sniOf(t, e.inbound(t, "vless-vision")); got != "www.microsoft.com" {
+		t.Fatalf("replaced behind a proxy: %s", got)
+	}
+	if s, _ := e.tn.Status(vision.ID); s.TargetOK || s.TargetError != "timeout" {
+		t.Fatalf("its target is still checked and shown: %+v", s)
+	}
+}
+
 // A cut-off inbound whose target is down but has no other site nearby still gets a new
 // port: the target was not the only thing to try.
 func TestNoOtherTargetStillMovesThePort(t *testing.T) {
@@ -400,7 +428,7 @@ func TestBoundDevices(t *testing.T) {
 			seen[n] = e.now.Add(-time.Minute).Unix()
 		}
 		// An address the user never fetched the subscription from.
-		e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: phone.Name, IP: "192.0.2.7", Seen: seen}}}
+		e.nodes.activity[1] = nodeapi.Activity{Clients: []nodeapi.ClientActivity{{Slot: phone.Name, IP: "192.0.2.7", Seen: seen}, {Slot: phone.Name, IP: "203.0.113.70", Seen: seen}}}
 	}
 	act("vless-xhttp", "hysteria2", "tuic", "vless-vision")
 	e.step(t, 0)
@@ -409,13 +437,14 @@ func TestBoundDevices(t *testing.T) {
 	e.now = e.now.Add(time.Minute)
 	act("hysteria2", "tuic", "vless-vision")
 	e.tn.Step(e.ctx)
-	if s, _ := e.tn.Status(x.ID); !s.CutOff || s.Blocked != 1 {
+	if s, _ := e.tn.Status(x.ID); !s.CutOff || s.Blocked != 2 {
 		t.Fatalf("the bound device must count, and what it reached must survive a restart: %+v", s)
 	}
 }
 
-// Behind a TCP proxy the port is what the proxy forwards to: a blocked inbound there
-// never moves, even with its switch left on. Its REALITY target is the admin's call.
+// Behind a proxy the port is what the proxy forwards to, and the site may be what it
+// routes by: a blocked inbound there never moves nor changes its site, even with the
+// switches left on (a row from before they were locked).
 func TestNeverMovesAPortBehindAProxy(t *testing.T) {
 	e := setup(t)
 	x := e.inbound(t, "vless-xhttp")
@@ -438,11 +467,12 @@ func TestNeverMovesAPortBehindAProxy(t *testing.T) {
 	if err := e.st.Q.SetInboundAuto(e.ctx, db.SetInboundAutoParams{AutoPort: 1, AutoSni: 1, ID: x.ID}); err != nil {
 		t.Fatal(err)
 	}
+	sni := sniOf(t, e.inbound(t, "vless-xhttp"))
 	e.nodes.found = []nodeapi.TargetResult{good("203.0.113.44:443", "shop.example.org")}
 	e.reaches("hysteria2", "tuic", "vless-vision")
 	e.step(t, time.Minute)
-	if got := e.inbound(t, "vless-xhttp"); got.Port != "443" || sniOf(t, got) != "shop.example.org" {
-		t.Fatalf("port kept, target replaced: port %s sni %s", got.Port, sniOf(t, got))
+	if got := e.inbound(t, "vless-xhttp"); got.Port != "443" || sniOf(t, got) != sni || len(e.events(t)) != 0 {
+		t.Fatalf("changed behind a proxy: port %s sni %s (was %s)", got.Port, sniOf(t, got), sni)
 	}
 }
 

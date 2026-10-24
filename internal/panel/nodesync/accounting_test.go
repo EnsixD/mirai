@@ -22,6 +22,7 @@ import (
 // is counted once.
 func TestBackgroundAccountingWritersDoNotConflict(t *testing.T) {
 	s1, node1, st, users, now := setup(t)
+	s1.m.storeInterval = 0 // batch after batch, each stored
 	ctx := context.Background()
 	tariffs, _ := st.Q.ListTariffs(ctx)
 	var slots []string
@@ -150,6 +151,7 @@ func TestSnapshotSharedAndConsistent(t *testing.T) {
 // soonest to expire first, whatever order the batches of the two nodes come in.
 func TestConcurrentBatchesSpendGrantsExactly(t *testing.T) {
 	s1, node1, st, users, now := setup(t)
+	s1.m.storeInterval = 0 // batch after batch, each stored
 	ctx := context.Background()
 	q := st.Q
 	pool, err := q.CreateTrafficPool(ctx, db.CreateTrafficPoolParams{Name: "WL", CreatedAt: 1})
@@ -183,7 +185,7 @@ func TestConcurrentBatchesSpendGrantsExactly(t *testing.T) {
 		if u, err = users.Update(ctx, u.ID, domain.Patch{TrafficLimit: &l}); err != nil {
 			t.Fatal(err)
 		}
-		if err := q.SetUserPoolLimit(ctx, db.SetUserPoolLimitParams{UserID: u.ID, PoolID: pool.ID, TrafficLimit: sql.NullInt64{Int64: poolLimit, Valid: true}}); err != nil {
+		if err := q.SetUserPool(ctx, db.SetUserPoolParams{UserID: u.ID, PoolID: pool.ID, Mode: domain.PoolOwn, TrafficLimit: sql.NullInt64{Int64: poolLimit, Valid: true}}); err != nil {
 			t.Fatal(err)
 		}
 		grant := func(pool, bytes int64, lifetime string, days int64) int64 {

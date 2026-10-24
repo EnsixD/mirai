@@ -3,10 +3,10 @@
 package subs
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -15,6 +15,7 @@ import (
 	"mirai/internal/panel/domain"
 	"mirai/internal/panel/store/db"
 	"mirai/internal/proto"
+	"mirai/internal/textutil"
 )
 
 // Endpoint describes how clients reach one node.
@@ -22,6 +23,9 @@ type Endpoint struct {
 	Host      string // IP or domain the client connects to
 	SNI       string // TLS server name for Hysteria2/TUIC; empty for IP-only nodes
 	PinSHA256 string // hex SHA-256 of the node's self-signed Hysteria2/TUIC certificate
+	// SNIRouter: the node shares its 443 between the inbounds marked for it, which clients
+	// reach on 443.
+	SNIRouter bool
 }
 
 // Node is one server in the subscription.
@@ -31,6 +35,8 @@ type Node struct {
 	// leading flag (or the whole name) prefixes proxy names.
 	Name     string
 	Endpoint Endpoint
+	// SSOneKey: the node is older than the Shadowsocks-2022 key per user (proto.ClientInput).
+	SSOneKey bool
 }
 
 // Groups are the proxy-group names Clash-family apps show; the admin can rename them.
@@ -52,13 +58,17 @@ const (
 	// foreign IPs, and the node does not carry traffic that needs no VPN.
 	RoutingRUDirect Routing = "ru_direct"
 	// RoutingAll sends everything but the LAN through the tunnel and needs no geodata.
-	RoutingAll     Routing = "all"
+	RoutingAll Routing = "all"
+	// RoutingBlocked sends only what is blocked or slowed down in Russia through the
+	// tunnel (blockedLists, and the services sent to it), the rest goes direct. Apps that
+	// cannot take rule lists get RoutingRUDirect.
+	RoutingBlocked Routing = "blocked"
 	DefaultRouting         = RoutingRUDirect
 )
 
 // ParseRouting maps a stored setting to a mode; empty and unknown values get the default.
 func ParseRouting(s string) Routing {
-	if r := Routing(s); r == RoutingRUDirect || r == RoutingAll {
+	if r := Routing(s); r == RoutingRUDirect || r == RoutingAll || r == RoutingBlocked {
 		return r
 	}
 	return DefaultRouting
@@ -81,7 +91,7 @@ func (g Groups) WithDefaults(lang string) Groups {
 	}
 	if g.Auto == "" {
 		g.Auto = "Авто"
-		if lang == "en" {
+		if textutil.Lang(lang).En() {
 			g.Auto = "Auto"
 		}
 	}
@@ -126,17 +136,28 @@ type Profile struct {
 	Skip     func(in db.Inbound, err error)
 	Slot     db.Slot
 	Inbounds []db.Inbound // enabled and allowed for this user, in display order
-	Nodes    []Node       // enabled nodes in display order; inbounds of other nodes are skipped
-	Direct   []string     // hosts that bypass the tunnel: the panel and every node
+	// What profile read on the way, for the subscription's page (info) to build on rather than
+	// read again: every inbound, the user's access and grants left.
+	all    []db.Inbound
+	access domain.Access
+	grants domain.GrantsLeft
+	Nodes  []Node   // enabled nodes in display order; inbounds of other nodes are skipped
+	Direct []string // hosts that bypass the tunnel: the panel and every node
 	// Fingerprint is the panel's default uTLS profile (proto.ClientInput.Fingerprint).
 	Fingerprint string
 	// Rules are the admin's own Clash rules (ServedRules), before the built-in routing.
 	Rules []string
+	// Routes go after the admin's rules, for the apps that take rule lists (App); Lang
+	// names the groups they add.
+	Routes Routes
+	App    App
+	Lang   string
 }
 
 type proxy struct {
 	name string
 	node int64
+	pool int64 // the inbound's server group, 0: none (the main servers)
 	uri  string
 	yaml map[string]any
 }
@@ -164,9 +185,9 @@ func build(p Profile) ([]proxy, error) {
 			if in.NodeID != n.ID {
 				continue
 			}
-			port, err := firstPort(in.Port)
-			if err != nil {
-				p.skip(in, err)
+			port := domain.FirstPort(in.Port)
+			if port == 0 {
+				p.skip(in, fmt.Errorf("bad port %q", in.Port))
 				continue
 			}
 			t, err := parseTemplate(in.Config)
@@ -174,6 +195,10 @@ func build(p Profile) ([]proxy, error) {
 				// Saved configs are validated; one broken inbound must not empty the subscription.
 				p.skip(in, err)
 				continue
+			}
+			spec := in.Port
+			if n.Endpoint.SNIRouter && proto.SNI443(t) {
+				port, spec = 443, "443"
 			}
 			base := domain.ProxyName(in)
 			// A name the admin typed is used as is; preset names get the node's flag.
@@ -185,14 +210,14 @@ func build(p Profile) ([]proxy, error) {
 			for i := 2; used[name]; i++ {
 				name = base + " " + strconv.Itoa(i)
 			}
-			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: in.Port,
-				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot})
+			c, err := proto.ClientConfig(t, proto.ClientInput{Name: name, Host: n.Endpoint.Host, Port: port, PortSpec: spec,
+				SNI: n.Endpoint.SNI, PinSHA256: n.Endpoint.PinSHA256, Fingerprint: p.Fingerprint, Slot: slot, SSOneKey: n.SSOneKey})
 			if err != nil {
 				p.skip(in, err)
 				continue
 			}
 			used[name] = true
-			out = append(out, proxy{name: name, node: n.ID, uri: c.URI, yaml: c.Mihomo})
+			out = append(out, proxy{name: name, node: n.ID, pool: in.PoolID.Int64, uri: c.URI, yaml: c.Mihomo})
 		}
 	}
 	return out, nil
@@ -204,71 +229,117 @@ func (p Profile) skip(in db.Inbound, err error) {
 	}
 }
 
-func firstPort(spec string) (int, error) {
-	head, _, _ := strings.Cut(spec, ",")
-	head, _, _ = strings.Cut(head, "-")
-	p, err := strconv.Atoi(strings.TrimSpace(head))
-	if err != nil || p <= 0 || p > 65535 {
-		return 0, fmt.Errorf("bad port %q", spec)
-	}
-	return p, nil
-}
-
 // URIs renders one share link per inbound.
 func URIs(p Profile) (string, error) {
+	links, _, err := uris(p)
+	return links, err
+}
+
+// uris are the share links of p and the proxies they are of.
+func uris(p Profile) (string, []proxy, error) {
 	ps, err := build(p)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	lines := make([]string, 0, len(ps))
+	in := make([]proxy, 0, len(ps))
 	for _, x := range ps {
 		if x.uri != "" { // the mihomo-only types have no share link
 			lines = append(lines, x.uri)
+			in = append(in, x)
 		}
 	}
 	if len(lines) == 0 {
-		return "", ErrNoProxies
+		return "", nil, ErrNoProxies
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), in, nil
 }
 
-// Mihomo renders a complete client profile. mihomo's parser accepts JSON as YAML.
+// Mihomo renders a complete client profile.
 func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
-	ps, err := build(p)
+	cfg, _, err := mihomoConfig(p, g, r)
 	if err != nil {
 		return nil, err
 	}
+	return marshalYAML(cfg)
+}
+
+// mihomoConfig is the profile Mihomo renders, and the proxies in it.
+func mihomoConfig(p Profile, g Groups, r Routing) (map[string]any, []proxy, error) {
+	ps, err := build(p)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(ps) == 0 {
 		// Groups with no proxies in them are a profile mihomo may refuse whole.
-		return nil, ErrNoProxies
+		return nil, nil, ErrNoProxies
 	}
+	return mihomoConfigOf(p, g, r, ps), ps, nil
+}
+
+// defaultNameservers are the DNS-over-HTTPS servers a profile resolves with, and the ones that
+// resolve the proxy servers' own names.
+var defaultNameservers = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
+
+// mihomoConfigOf is the profile of ps.
+func mihomoConfigOf(p Profile, g Groups, r Routing, ps []proxy) map[string]any {
 	g = g.WithDefaults("")
 	proxies := make([]map[string]any, len(ps))
 	names := make([]string, len(ps))
 	for i, x := range ps {
 		proxies[i], names[i] = x.yaml, x.name
 	}
-	countries := countryGroups(p.Nodes, ps, g, names)
+	var countries []map[string]any
+	if !p.Routes.Servers.NoCountries {
+		countries = countryGroups(p.Nodes, ps, g, names)
+	}
 	selector := []string{g.Auto}
 	for _, c := range countries {
 		selector = append(selector, c["name"].(string))
 	}
+	auto := urlTest(g.Auto, names)
+	if p.Routes.Servers.Auto == "fallback" {
+		auto["type"] = "fallback" // the first that works, in the order of the nodes
+		delete(auto, "tolerance")
+	}
 	groups := []map[string]any{
 		{"name": g.Main, "type": "select", "proxies": append(selector, names...)},
-		urlTest(g.Auto, names),
+		auto,
 	}
 	groups = append(groups, countries...)
+	if n := p.Routes.Servers.Interval; n > 0 {
+		for _, gr := range groups[1:] {
+			gr["interval"] = n
+		}
+	}
+	taken := map[string]bool{}
+	for _, n := range append(append([]string{}, names...), g.Main, g.Auto, AliasGroup) {
+		taken[strings.ToLower(n)] = true
+	}
+	for _, c := range countries {
+		taken[strings.ToLower(c["name"].(string))] = true
+	}
+	if !p.routable() && r == RoutingBlocked {
+		r = RoutingRUDirect
+	}
+	rt := p.route(g, ps, taken, r)
+	groups = append(groups, rt.groups...)
 	if g.Main != AliasGroup {
 		groups = append(groups, map[string]any{"name": AliasGroup, "type": "select", "proxies": []string{g.Main}, "hidden": true})
 	}
 	dns := map[string]any{
 		"enable": true, "ipv6": false, "enhanced-mode": "fake-ip", "fake-ip-range": "198.18.0.1/16",
 		"default-nameserver": []string{"1.1.1.1", "8.8.8.8"},
-		"nameserver":         []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"},
+		"nameserver":         slices.Clone(defaultNameservers),
 	}
 	// The panel and the nodes stay out of the tunnel whatever the admin's rules say.
 	rules := append(directRules(p.Direct), "GEOIP,LAN,DIRECT,no-resolve")
+	tune := p.Routes.Tune
+	if tune.BlockQUIC {
+		rules = append(rules, "AND,((NETWORK,UDP),(DST-PORT,443)),REJECT")
+	}
 	rules = append(rules, p.Rules...)
+	rules = append(rules, rt.rules...)
 	cfg := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning",
 		// The node has no IPv6 on most VPS: with it on, apps first try IPv6 through the
@@ -278,21 +349,44 @@ func Mihomo(p Profile, g Groups, r Routing) ([]byte, error) {
 		"proxies":      proxies,
 		"proxy-groups": groups,
 	}
+	if len(rt.providers) > 0 {
+		cfg["rule-providers"] = rt.providers
+	}
+	if rt.geodata || r != RoutingAll {
+		cfg["geodata-mode"], cfg["geox-url"] = false, geoxURL
+	}
 	if r == RoutingRUDirect {
 		rules = append(rules, "GEOSITE,category-ru,DIRECT", "GEOIP,ru,DIRECT")
-		cfg["geodata-mode"], cfg["geox-url"] = false, geoxURL
+	}
+	if r != RoutingAll {
 		// GEOIP,ru makes the app resolve every domain itself. DoH straight from Russia
 		// stalls under TSPU throttling, so it goes through the tunnel (the alias group has
 		// a fixed name: "&" or "=" in a renamed group would break the "#group" suffix).
 		// Russian domains resolve with Yandex DNS directly and keep working without the VPN.
 		dns["nameserver"] = []string{"https://1.1.1.1/dns-query#" + AliasGroup, "https://8.8.8.8/dns-query#" + AliasGroup}
-		dns["proxy-server-nameserver"] = []string{"https://1.1.1.1/dns-query", "https://dns.google/dns-query"}
+		dns["proxy-server-nameserver"] = slices.Clone(defaultNameservers)
 		dns["nameserver-policy"] = map[string]any{"geosite:category-ru": []string{"77.88.8.8", "77.88.8.1"}}
 	}
-	// mihomo skips a rule whose selected proxy cannot carry UDP (XHTTP).
-	// Never let that fall through to its implicit DIRECT route.
-	cfg["rules"] = append(rules, "MATCH,"+g.Main, "MATCH,REJECT")
-	return json.MarshalIndent(cfg, "", "  ")
+	p.Routes.DNS.apply(dns)
+	if tune.RealIP {
+		dns["enhanced-mode"] = "redir-host"
+		delete(dns, "fake-ip-range")
+	}
+	if tune.Sniffer {
+		cfg["sniffer"] = map[string]any{"enable": true, "parse-pure-ip": true,
+			"sniff": map[string]any{"HTTP": map[string]any{"ports": []any{80, "8080-8880"}}, "TLS": map[string]any{"ports": []any{443, 8443}},
+				"QUIC": map[string]any{"ports": []any{443, 8443}}}}
+	}
+	// mihomo skips a rule whose group can't carry UDP (a proxy with udp off, picked by hand
+	// or by url-test) and sends what falls through to DIRECT: past the tunnel, from the real
+	// address. REJECT makes such apps fall back to TCP instead. In the "blocked" mode the
+	// rest goes direct by design; its tunnel rules get their own REJECT twins (blockedRules).
+	last := []string{"MATCH," + g.Main, "MATCH,REJECT"}
+	if r == RoutingBlocked {
+		last = []string{"MATCH,DIRECT"}
+	}
+	cfg["rules"] = append(rules, last...)
+	return cfg
 }
 
 func urlTest(name string, proxies []string) map[string]any {

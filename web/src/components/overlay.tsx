@@ -1,27 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useLayoutEffect, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { t } from "../i18n";
-import { Button } from "./ui";
+import { Button, Field } from "./ui";
 
-const openDialogs = new Set<symbol>();
-
-// Track React's open state, not exit-animation nodes left in the portal.
-function useModalBackdrop(open: boolean) {
-  useLayoutEffect(() => {
-    if (!open) return;
-    const id = Symbol();
-    openDialogs.add(id);
-    document.body.dataset.modalOpen = "true";
-    return () => {
-      openDialogs.delete(id);
-      if (openDialogs.size === 0) delete document.body.dataset.modalOpen;
-    };
-  }, [open]);
-}
-
-/** Side sheet on desktop, full-height sheet on phones. Title is required for screen readers. */
+/** A window in the middle of the screen over the page (not a side sheet). Title is required for screen readers. */
 export function Drawer({
   open,
   onOpenChange,
@@ -30,22 +14,22 @@ export function Drawer({
   lead,
   children,
   footer,
-  presentation = "drawer",
-  modalWidth = "form",
+  wide,
+  titleAction,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
+  /** A small button beside the title, such as renaming the record. */
+  titleAction?: ReactNode;
   meta?: ReactNode;
   lead?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
-  presentation?: "drawer" | "modal";
-  modalWidth?: "form" | "protocol";
+  /** A record's card with many sections: a little wider than a form. */
+  wide?: boolean;
 }) {
   const reduce = useReducedMotion();
-  useModalBackdrop(open);
-  const modal = presentation === "modal";
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -54,20 +38,27 @@ export function Drawer({
             <Dialog.Overlay asChild forceMount>
               <motion.div className="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />
             </Dialog.Overlay>
-            <Dialog.Content asChild forceMount aria-describedby={undefined}>
-              <motion.aside
-                className={modal ? `creation-modal ${modalWidth === "form" ? "creation-form-modal" : ""} glass-strong` : "drawer glass-strong"}
-                initial={modal ? { opacity: 0, scale: reduce ? 1 : 0.96, x: "-50%", y: "-48%" } : reduce ? { opacity: 0 } : { x: "110%" }}
-                animate={modal ? { opacity: 1, scale: 1, x: "-50%", y: "-50%" } : reduce ? { opacity: 1 } : { x: 0 }}
-                exit={modal ? { opacity: 0, scale: reduce ? 1 : 0.98, x: "-50%", y: "-48%" } : reduce ? { opacity: 0 } : { x: "110%" }}
-                transition={{ type: "spring", stiffness: 380, damping: 40 }}
+            <Dialog.Content asChild forceMount aria-describedby={undefined} onEscapeKeyDown={keepOpenForLocalEscape}>
+              {/* Centred by CSS layout like .dialog: motion owns the transform for the scale. */}
+              <motion.div
+                role="dialog"
+                className={wide ? "drawer wide glass-strong" : "drawer glass-strong"}
+                initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+                animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.98, y: 4 }}
+                transition={{ duration: 0.18 }}
               >
                 <header className="dr-head">
                   {lead}
                   <div className="dr-title min-w-0 flex-1">
-                    <Dialog.Title asChild>
-                      <h2>{title}</h2>
-                    </Dialog.Title>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <Dialog.Title asChild>
+                        <h2 className="min-w-0" title={title}>
+                          {title}
+                        </h2>
+                      </Dialog.Title>
+                      {titleAction}
+                    </div>
                     {meta ? <div className="dr-meta">{meta}</div> : null}
                   </div>
                   <Dialog.Close className="icon-btn" aria-label={t("common.close")}>
@@ -76,12 +67,154 @@ export function Drawer({
                 </header>
                 <div className="dr-body">{children}</div>
                 {footer ? <footer className="dr-foot">{footer}</footer> : null}
-              </motion.aside>
+              </motion.div>
             </Dialog.Content>
           </Dialog.Portal>
         ) : null}
       </AnimatePresence>
     </Dialog.Root>
+  );
+}
+
+/**
+ * The footer of a drawer that holds a form: Cancel, and the button that submits the form.
+ * The footer sits outside the <form>, so the button names it by id (`form`). `children` is
+ * the submit button's label.
+ */
+export function DrawerFooter({
+  form,
+  onCancel,
+  loading,
+  disabled,
+  children,
+}: {
+  form: string;
+  onCancel: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <Button variant="ghost" onClick={onCancel}>
+        {t("common.cancel")}
+      </Button>
+      <Button variant="primary" type="submit" form={form} loading={loading} disabled={disabled}>
+        {children}
+      </Button>
+    </>
+  );
+}
+
+/**
+ * A dialog that asks for one name: renaming a client or a device. `optional` lets it be
+ * emptied (the device goes back to the name its app reports, shown as the placeholder).
+ * `error` is the API's word on the name; the dialog stays open with it.
+ */
+export function NameDialog({
+  open,
+  onOpenChange,
+  title,
+  label,
+  initial,
+  placeholder,
+  hint,
+  maxLength,
+  optional,
+  error,
+  loading,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  title: string;
+  label: string;
+  initial: string;
+  placeholder?: string;
+  hint?: ReactNode;
+  maxLength: number;
+  optional?: boolean;
+  error?: string;
+  loading?: boolean;
+  onSubmit: (name: string) => void;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <AnimatePresence>
+        {open ? (
+          <Dialog.Portal forceMount>
+            <Dialog.Overlay asChild forceMount>
+              <motion.div className="scrim" style={{ zIndex: 55 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+            </Dialog.Overlay>
+            <Dialog.Content asChild forceMount aria-describedby={undefined} onEscapeKeyDown={keepOpenForLocalEscape}>
+              <motion.div className="dialog glass-strong" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.18 }}>
+                <Dialog.Title asChild>
+                  <h2>{title}</h2>
+                </Dialog.Title>
+                <NameForm label={label} initial={initial} placeholder={placeholder} hint={hint} maxLength={maxLength} optional={optional} error={error} loading={loading} onSubmit={onSubmit} />
+              </motion.div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        ) : null}
+      </AnimatePresence>
+    </Dialog.Root>
+  );
+}
+
+function NameForm({
+  label,
+  initial,
+  placeholder,
+  hint,
+  maxLength,
+  optional,
+  error,
+  loading,
+  onSubmit,
+}: {
+  label: string;
+  initial: string;
+  placeholder?: string;
+  hint?: ReactNode;
+  maxLength: number;
+  optional?: boolean;
+  error?: string;
+  loading?: boolean;
+  onSubmit: (name: string) => void;
+}) {
+  const id = useId();
+  const [name, setName] = useState(initial);
+  const clean = name.trim();
+  const ok = (optional || clean !== "") && clean !== initial.trim();
+  const send = (e: FormEvent) => {
+    e.preventDefault();
+    if (ok && !loading) onSubmit(clean);
+  };
+  return (
+    <form onSubmit={send} noValidate className="mt-4">
+      <Field label={label} htmlFor={id} hint={hint} error={error}>
+        <input
+          id={id}
+          className="input"
+          value={name}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          aria-invalid={!!error}
+          autoComplete="off"
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+      <div className="mt-6 flex justify-end gap-2">
+        <Dialog.Close asChild>
+          <Button variant="ghost">{t("common.cancel")}</Button>
+        </Dialog.Close>
+        <Button variant="primary" type="submit" loading={loading} disabled={!ok}>
+          {t("common.save")}
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -93,7 +226,9 @@ export function Confirm({
   confirm,
   danger,
   loading,
+  confirmDisabled,
   onConfirm,
+  children,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -102,9 +237,12 @@ export function Confirm({
   confirm: string;
   danger?: boolean;
   loading?: boolean;
+  /** The confirm button waits for something the children ask of the admin (a box to tick). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
+  /** What the text cannot hold: a list to approve, a warning. */
+  children?: ReactNode;
 }) {
-  useModalBackdrop(open);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -113,14 +251,14 @@ export function Confirm({
             <Dialog.Overlay asChild forceMount>
               <motion.div className="scrim" style={{ zIndex: 55 }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
             </Dialog.Overlay>
-            <Dialog.Content asChild forceMount>
-              {/* motion owns the transform: the centring shift goes with the scale, or the scale
-                  would replace the CSS translate and leave the dialog's corner at the centre. */}
+            <Dialog.Content asChild forceMount onEscapeKeyDown={keepOpenForLocalEscape}>
+              {/* Centred by CSS layout, not by the transform: motion owns the transform and drops
+                  it with reduced motion (Android's battery saver), which left the corner at the centre. */}
               <motion.div
                 className="dialog glass-strong"
-                initial={{ opacity: 0, scale: 0.96, x: "-50%", y: "-50%" }}
-                animate={{ opacity: 1, scale: 1, x: "-50%", y: "-50%" }}
-                exit={{ opacity: 0, scale: 0.98, x: "-50%", y: "-50%" }}
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.98 }}
                 transition={{ duration: 0.18 }}
               >
                 <Dialog.Title asChild>
@@ -129,11 +267,12 @@ export function Confirm({
                 <Dialog.Description asChild>
                   <p className="muted mt-2">{text}</p>
                 </Dialog.Description>
+                {children}
                 <div className="mt-6 flex justify-end gap-2">
                   <Dialog.Close asChild>
                     <Button variant="ghost">{t("common.cancel")}</Button>
                   </Dialog.Close>
-                  <Button variant={danger ? "danger-solid" : "primary"} loading={loading} onClick={onConfirm}>
+                  <Button variant={danger ? "danger-solid" : "primary"} loading={loading} disabled={confirmDisabled} onClick={onConfirm}>
                     {confirm}
                   </Button>
                 </div>
@@ -144,4 +283,12 @@ export function Confirm({
       </AnimatePresence>
     </Dialog.Root>
   );
+}
+
+/**
+ * Escape in a field marked data-local-escape (an inline editor inside a drawer or a dialog)
+ * is the field's own: it closes the field, the window around it stays open.
+ */
+function keepOpenForLocalEscape(e: KeyboardEvent) {
+  if (e.target instanceof Element && e.target.closest("[data-local-escape]")) e.preventDefault();
 }

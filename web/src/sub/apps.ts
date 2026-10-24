@@ -1,36 +1,53 @@
 export type Platform = "ios" | "android" | "windows" | "macos" | "linux";
 
-type App = { name: string; note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols"; link: (url: string, brand: string) => string };
+type App = {
+  name: string;
+  note: "easiest" | "free" | "stable" | "openSource" | "modern" | "bestWindows" | "tun" | "oneButton" | "allProtocols" | "everything";
+  link: (url: string, brand: string, happ?: string) => string;
+};
 export const enc = encodeURIComponent;
 const clash = (url: string, brand: string) => `clash://install-config?url=${enc(url)}&name=${enc(brand)}`;
 const slothClash = (url: string, brand: string) => `slothclash://install-config?url=${enc(url)}&name=${enc(brand)}`;
+// Mikan (Android) and Kabosu (desktop) are the apps of the mikan project, each with a scheme no other
+// Clash app takes: the profile lands in them, not in whichever app holds clash://.
+const mikanApp = (url: string, brand: string) => `mikan://install-config?url=${enc(url)}&name=${enc(brand)}`;
+const kabosu = (url: string, brand: string) => `kabosu://install-config?url=${enc(url)}&name=${enc(brand)}`;
+const incy = (url: string) => `incy://add/${url}`;
+
+// Happ opens the crypt link when the panel gives one: the address stays hidden.
+const happ = (u: string, _brand: string, crypt?: string) => crypt || `happ://add/${u}`;
 
 export const APPS: Record<Platform, App[]> = {
   ios: [
-    { name: "Happ", note: "easiest", link: (u) => `happ://add/${u}` },
+    { name: "Happ", note: "easiest", link: happ },
+    { name: "INCY", note: "modern", link: incy },
     { name: "Streisand", note: "free", link: (u, b) => `streisand://import/${u}#${enc(b)}` },
     { name: "v2RayTun", note: "stable", link: (u) => `v2raytun://import/${u}` },
   ],
   android: [
-    { name: "Happ", note: "easiest", link: (u) => `happ://add/${u}` },
+    { name: "Mikan", note: "everything", link: mikanApp },
+    { name: "Happ", note: "easiest", link: happ },
     { name: "ClashFest", note: "allProtocols", link: (u, b) => `clashfest://install-config?url=${enc(u)}&name=${enc(b)}` },
-    { name: "INCY", note: "modern", link: (u) => `incy://add/${u}` },
+    { name: "INCY", note: "modern", link: incy },
     { name: "v2RayTun", note: "stable", link: (u) => `v2raytun://import/${u}` },
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
   ],
   windows: [
+    { name: "Kabosu", note: "tun", link: kabosu },
     { name: "Koala Clash", note: "bestWindows", link: (u, b) => `koala-clash://install-config?url=${enc(u)}&name=${enc(b)}` },
     { name: "SlothClash", note: "tun", link: slothClash },
     { name: "Hiddify", note: "easiest", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
     { name: "Clash Verge Rev", note: "tun", link: clash },
   ],
   macos: [
+    { name: "Kabosu", note: "tun", link: kabosu },
     { name: "Clash Verge Rev", note: "tun", link: clash },
     { name: "SlothClash", note: "tun", link: slothClash },
-    { name: "Happ", note: "oneButton", link: (u) => `happ://add/${u}` },
+    { name: "Happ", note: "oneButton", link: happ },
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },
   ],
   linux: [
+    { name: "Kabosu", note: "tun", link: kabosu },
     { name: "SlothClash", note: "tun", link: slothClash },
     { name: "Clash Verge Rev", note: "tun", link: clash },
     { name: "Hiddify", note: "openSource", link: (u, b) => `hiddify://import/${u}#${enc(b)}` },

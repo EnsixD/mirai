@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,23 +29,19 @@ import (
 	"mirai/internal/panel/store/db"
 )
 
-const usage = `mirai — VPN panel on the mihomo core
+const usage = `mirai — VPN panel on the Citrus core
 
 Commands:
   serve                         run the panel
-  reset-password [flags]        shortcut for admin reset-password
-  reset-path [flags]            shortcut for admin reset-path
-  disable-2fa [flags]            shortcut for admin disable-2fa
-  url                           print the panel's link
   admin bootstrap [flags]       first setup: admin, secret paths, address, language
   admin url                     print the panel's link
   admin reset-password          set a new admin password (ends all sessions and revokes all API keys)
   admin reset-path              give the panel a new secret link
   admin disable-2fa             turn off the admin's 2FA
   admin backup FILE             write a consistent copy of the database while the panel runs
-  database migrate              import legacy SQLite while the panel is stopped
+  database migrate              bring the database schema up to date while the panel is stopped
   database backup FILE          write a PostgreSQL archive (pg_dump)
-  database restore FILE         restore PostgreSQL or import a legacy SQLite backup offline
+  database restore FILE         restore a PostgreSQL backup offline
   admin inbound list            inbounds: node, name, preset, port
   admin inbound add PRESET [--port PORT] [--node NODE]
                                 add an inbound from a preset with fresh keys
@@ -86,8 +81,6 @@ func Run(ctx context.Context, args []string, version string, web fs.FS) error {
 		return app.Serve(ctx, cfg, version, web)
 	case "admin":
 		return adminCmd(ctx, args[1:])
-	case "bootstrap", "url", "reset-password", "reset-path", "disable-2fa":
-		return adminCmd(ctx, args)
 	case "database":
 		return databaseCmd(ctx, args[1:])
 	case "openapi":
@@ -328,7 +321,7 @@ func resetPassword(ctx context.Context, st *store.Store, args []string, stdin io
 	return nil
 }
 
-// health accepts the camouflage page and the legacy bare 404 on the local listener.
+// health is the container healthcheck: the panel must answer "/" with its bare 404.
 func health() error {
 	cfg, err := config.FromEnv()
 	if err != nil {
@@ -347,13 +340,8 @@ func health() error {
 	}
 	// Liveness of the local listener only; the certificate is not what is being checked.
 	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-	resp, err := c.Get(scheme + "://" + net.JoinHostPort(host, port) + "/")
-	if err != nil {
+	if err := probe(c, scheme+"://"+net.JoinHostPort(host, port)+"/"); err != nil {
 		return err
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	// A panel that answers but has lost its database serves nothing but errors. One bare
 	// query on a connection of its own: no pool, no migrations.
@@ -370,6 +358,21 @@ func health() error {
 	return nil
 }
 
+// probe asks the panel's root: any answer short of a server error means it serves. The
+// root is a 404, or the admin's own site (data/www) with its 200: a health check that
+// wanted the 404 called a panel with a site unhealthy, and updates gave it up.
+func probe(c *http.Client, url string) error {
+	resp, err := c.Get(url)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 	if !fromStdin {
 		return secure.Token(32), true, nil
@@ -379,8 +382,8 @@ func readOrGeneratePassword(fromStdin bool, r io.Reader) (string, bool, error) {
 		return "", false, err
 	}
 	pw := strings.TrimRight(line, "\r\n")
-	if len(pw) < 12 {
-		return "", false, errors.New("the password must be at least 12 characters long")
+	if len(pw) < auth.MinPassword {
+		return "", false, fmt.Errorf("the password must be at least %d characters long", auth.MinPassword)
 	}
 	return pw, false, nil
 }
@@ -451,8 +454,8 @@ func panelURL(ctx context.Context, set *settings.Settings) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if ep.Host == "" || p.Admin == "" {
+	if ep.URL() == "" || p.Admin == "" {
 		return "", errors.New("the panel is not set up: run `mirai admin bootstrap`")
 	}
-	return "https://" + net.JoinHostPort(ep.Host, strconv.Itoa(ep.Port)) + "/" + p.Admin + "/", nil
+	return ep.URL() + "/" + p.Admin + "/", nil
 }

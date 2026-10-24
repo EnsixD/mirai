@@ -67,9 +67,14 @@ func TestParseIgnoresUnknownFields(t *testing.T) {
 	}
 }
 
-func TestEmbeddedKey(t *testing.T) {
-	if _, err := Key(PublicKey); err != nil {
-		t.Fatalf("the embedded release key: %v", err)
+func TestEmbeddedKeys(t *testing.T) {
+	for _, k := range append([]string{CatalogKey, CommunityKey}, ReleaseKeys...) {
+		if _, err := Key(k); err != nil {
+			t.Fatalf("the embedded key %s: %v", k, err)
+		}
+	}
+	if len(TrustedKeys()) != len(ReleaseKeys) {
+		t.Fatal("TrustedKeys is not ReleaseKeys")
 	}
 }
 
@@ -168,6 +173,32 @@ func TestFourComponentManifest(t *testing.T) {
 	}
 }
 
+// Valid is what a request for a release may name: a version, nothing else of any length.
+func TestValidAndAtLeast(t *testing.T) {
+	for _, v := range []string{"0.5.0.2", "0.5.0", "1.2.3", "0.5.0.2-rc.1", "0.5.0.10"} {
+		if !Valid(v) {
+			t.Errorf("%q refused", v)
+		}
+	}
+	for _, v := range []string{"", "dev", "latest", "v0.5.0.2", "0.5", "0.5.0.2.1", " 0.5.0.2", "0.5.0.2\n", "../0.5.0.2", "0.5.0.2-", "0.5.0.2-" + strings.Repeat("x", 80)} {
+		if Valid(v) {
+			t.Errorf("%q accepted", v)
+		}
+	}
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"0.5.0.2", "0.5.0.2", true}, {"0.5.0.3", "0.5.0.2", true}, {"0.5.1.0", "0.5.0.2", true}, {"0.6.0", "0.5.0.2", true},
+		{"0.5.0.1", "0.5.0.2", false}, {"0.5.0", "0.5.0.2", false}, {"0.5.0.2-rc.1", "0.5.0.2", false}, {"0.5.0.0", "0.5.0", true},
+		{"dev", "0.5.0.2", false}, {"0.5.0.2", "dev", false}, {"", "", false},
+	} {
+		if got := AtLeast(c.a, c.b); got != c.want {
+			t.Errorf("AtLeast(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
 func TestNotes(t *testing.T) {
 	log := []byte("# Changelog\n\n## 0.3.10\n### en\n- later\n\n## 0.3.9\n### en\n- one\n- two\n\n### ru\n- раз\n- два\n\n## 0.3.8\n### en\n- old\n")
 	n := Notes(log, "0.3.9")
@@ -176,5 +207,28 @@ func TestNotes(t *testing.T) {
 	}
 	if n := Notes(log, "9.9.9"); len(n) != 0 {
 		t.Fatalf("no section: %q", n)
+	}
+}
+
+// A beta takes its own section when there is one, else the section of the release it
+// leads to; a stable release never borrows.
+func TestNotesFor(t *testing.T) {
+	log := []byte("# Changelog\n\n## 0.5.0.3-rc.2\n### en\n- rc2 only\n\n## 0.5.0.3\n### en\n- the release\n### ru\n- релиз\n")
+	if n := NotesFor(log, "0.5.0.3-rc.1"); n["en"] != "- the release" || n["ru"] != "- релиз" {
+		t.Fatalf("rc.1 borrows: %q", n)
+	}
+	if n := NotesFor(log, "0.5.0.3-rc.2"); n["en"] != "- rc2 only" {
+		t.Fatalf("rc.2 has its own: %q", n)
+	}
+	if n := NotesFor(log, "0.5.0.4"); len(n) != 0 {
+		t.Fatalf("a stable release without a section: %q", n)
+	}
+}
+
+// The support desk knows the official build by this fingerprint (mirai-bot keeps a copy):
+// a changed or an added release key changes it, and the desk must be told.
+func TestKeyFingerprint(t *testing.T) {
+	if got := KeyFingerprint(); got != "0570ab89f762390c" {
+		t.Fatalf("KeyFingerprint() = %s", got)
 	}
 }

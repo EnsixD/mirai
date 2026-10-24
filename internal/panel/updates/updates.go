@@ -19,17 +19,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"mirai/internal/fsutil"
+	"mirai/internal/httpjson"
+	"mirai/internal/pace"
 	"mirai/internal/release"
 )
 
@@ -51,6 +50,8 @@ type Found struct {
 	// Fallback says why the release index was not used, when the answer is GitHub's latest
 	// release instead; "" when it came from the index.
 	Fallback string
+	// Goals are the index's (none when it fell back).
+	Goals release.Goals
 }
 
 // Source finds the release for a query, checked.
@@ -67,67 +68,32 @@ var (
 // Fetch looks in the signed release index at indexURL (its signature at indexURL + ".sig")
 // and fetches the manifest of the release it names; when the index cannot be had or
 // believed, it takes the manifest at latestURL, so a broken index never stops updates.
-// Every file is checked against the release key.
+// Every file is checked against the release keys (release.ReleaseKeys).
 func Fetch(indexURL, latestURL string) Source {
-	pub, err := release.Key(release.PublicKey)
-	if err != nil {
-		panic(err)
-	}
-	return fetch(indexURL, latestURL, pub, &http.Client{Timeout: 30 * time.Second})
+	return fetch(indexURL, latestURL, release.TrustedKeys(), &http.Client{Timeout: 30 * time.Second})
 }
 
-func fetch(indexURL, latestURL string, pub ed25519.PublicKey, client *http.Client) Source {
+func fetch(indexURL, latestURL string, keys []ed25519.PublicKey, client *http.Client) Source {
 	get := func(ctx context.Context, u string, limit int64) ([]byte, error) {
-		// GitHub can cache the latest-release redirect after a new release is published.
-		// Keep immutable asset URLs stable, but always refresh mutable latest/index URLs.
-		if parsed, err := url.Parse(u); err == nil && (parsed.Host == "raw.githubusercontent.com" || (parsed.Host == "github.com" && strings.Contains(parsed.Path, "/releases/latest/"))) {
-			query := parsed.Query()
-			query.Set("mirai_check", fmt.Sprint(time.Now().UnixNano()))
-			parsed.RawQuery = query.Encode()
-			u = parsed.String()
-		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("Cache-Control", "no-cache")
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusNotFound {
+		data, err := httpjson.Fetch(client, req, limit)
+		switch code := httpjson.Code(err); {
+		case code == http.StatusNotFound:
 			return nil, ErrNoRelease
+		case code != 0:
+			return nil, fmt.Errorf("GET %s: HTTP %d", u, code)
 		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("GET %s: %s", u, resp.Status)
-		}
-		return io.ReadAll(io.LimitReader(resp.Body, limit))
+		return data, err
 	}
-	// signed reads a file and its signature and parses them. The two are two requests: a
-	// release published between them leaves the new file with the old signature, and
-	// asking again gets a matching pair.
 	signed := func(ctx context.Context, u string, parse func(data []byte, sig string) error) error {
-		once := func() error {
-			data, err := get(ctx, u, 1<<20)
-			if err != nil {
-				return err
-			}
-			sig, err := get(ctx, u+".sig", 4096)
-			if err != nil {
-				return err
-			}
-			return parse(data, string(sig))
-		}
-		err := once()
-		if errors.Is(err, release.ErrSignature) {
-			err = once()
-		}
-		return err
+		return release.FetchSigned(ctx, get, u, ".sig", 1<<20, parse)
 	}
 	manifest := func(ctx context.Context, u string) (m release.Manifest, err error) {
 		err = signed(ctx, u, func(data []byte, sig string) (err error) {
-			m, err = release.Parse(data, sig, pub)
+			m, err = release.Parse(data, sig, keys...)
 			return err
 		})
 		return m, err
@@ -135,14 +101,14 @@ func fetch(indexURL, latestURL string, pub ed25519.PublicKey, client *http.Clien
 	fromIndex := func(ctx context.Context, q Query) (Found, error) {
 		var ix release.Index
 		err := signed(ctx, indexURL, func(data []byte, sig string) (err error) {
-			ix, err = release.ParseIndex(data, sig, pub)
+			ix, err = release.ParseIndex(data, sig, keys...)
 			return err
 		})
 		if err != nil {
 			return Found{}, fmt.Errorf("release index: %w", err)
 		}
 		c := release.Choose(ix.Releases, q.Current, q.Channel == release.Beta)
-		var f Found
+		f := Found{Goals: ix.Goals}
 		e := c.Target
 		switch {
 		case c.Newest.Version == "":
@@ -221,19 +187,12 @@ func (c *Checker) Run(ctx context.Context) {
 	if c.source == nil {
 		return
 	}
-	t := time.NewTimer(firstCheck)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			next := checkEvery
-			// No release yet is an answer, not a failure.
-			if err := c.check(ctx); err != nil && !errors.Is(err, ErrNoRelease) {
-				next = retryAfter
-			}
-			t.Reset(next)
+	wait := firstCheck
+	for pace.Sleep(ctx, wait) {
+		wait = checkEvery
+		// No release yet is an answer, not a failure.
+		if err := c.check(ctx); err != nil && !errors.Is(err, ErrNoRelease) {
+			wait = retryAfter
 		}
 	}
 }
@@ -313,9 +272,15 @@ func (c *Checker) SetPolicy(p Policy) error {
 	return c.write("policy.json", data)
 }
 
-// Request asks the host to update now.
+// Request asks the host to update now, to the release the page shows when it shows one: a
+// host whose copy of the release index is older (GitHub's cache, for minutes after a
+// release) reads it again instead of calling its own version the latest.
 func (c *Checker) Request() error {
-	data, _ := json.Marshal(map[string]string{"at": c.now().UTC().Format(time.RFC3339)})
+	req := map[string]string{"at": c.now().UTC().Format(time.RFC3339)}
+	if s := c.State(); s.Available() {
+		req["version"] = s.Latest.Version
+	}
+	data, _ := json.Marshal(req)
 	return c.write("request", data)
 }
 

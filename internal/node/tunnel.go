@@ -1,10 +1,7 @@
 package node
 
 import (
-	"io"
 	"net"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	N "github.com/metacubex/mihomo/common/net"
@@ -13,8 +10,10 @@ import (
 	"mirai/internal/nodeapi"
 )
 
-// Tunnel sits between mihomo listeners and mihomo's own tunnel: it resolves the slot
-// from metadata.InUser, enforces policy, counts bytes and keeps connections kickable.
+// Tunnel sits between the core's listeners and its tunnel. The core counts, limits and
+// closes users by itself (core.go); what passes through here is what spans the inbounds
+// of a slot: the device limit and the torrent blocker, plus the ingress filter. The
+// user's speed is the core's too, worked out by the registry (shaper.go).
 type Tunnel struct {
 	inner C.Tunnel
 	reg   *Registry
@@ -40,20 +39,45 @@ func (t *Tunnel) HandleTCPConn(conn net.Conn, m *C.Metadata) {
 		t.inner.HandleTCPConn(conn, m)
 		return
 	}
+	if !t.reg.admitFrom(m.SrcIP) {
+		_ = conn.Close()
+		return
+	}
 	ip := m.SrcIP.Unmap().String()
-	s, b := t.reg.admitIn(userOf(conn, m), m.InName, ip, true)
+	s := t.reg.admitIn(m.InUser, m.InName, ip)
 	if s == nil {
 		_ = conn.Close()
 		return
 	}
-	c := &countingConn{Conn: conn, slot: s, bucket: b, inName: m.InName, ip: ip, now: t.reg.now, dest: m.RemoteAddress(), started: t.reg.now()}
-	s.addConn(c)
-	defer c.Close()
-	t.inner.HandleTCPConn(c, m)
-	// The sniffer has read the site's name by now, when the client sent a bare IP.
-	if m.SniffHost != "" && m.DstIP.IsValid() {
-		s.learn(c, m.DstIP.String(), m.SniffHost)
+	if t.reg.torrentWatch(s) {
+		bc := N.NewBufferedConn(conn)
+		conn = bc
+		if kind := torrentTCP(peekFirst(bc)); kind != "" {
+			t.reg.caught(s, ip, m.InName, "tcp", kind, m.RemoteAddress())
+			_ = conn.Close()
+			return
+		}
 	}
+	// The core holds the connection to the user's speed (shaper.go) and counts it to its
+	// site as it ends (sites.go).
+	t.inner.HandleTCPConn(conn, m)
+}
+
+// peekFirst returns the bytes the client sent first, waiting torrentPeekWait at most;
+// nil when it sent nothing by then, or the connection cannot be given a deadline and
+// waiting could hang it.
+func peekFirst(bc *N.BufferedConn) []byte {
+	if bc.SetReadDeadline(time.Now().Add(torrentPeekWait)) != nil {
+		return nil
+	}
+	_, err := bc.Peek(1)
+	_ = bc.SetReadDeadline(time.Time{})
+	if err != nil {
+		return nil
+	}
+	// Peek(1) has buffered what arrived with the first byte; this one cannot block.
+	b, _ := bc.Peek(bc.Buffered())
+	return b
 }
 
 func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
@@ -61,99 +85,26 @@ func (t *Tunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 		t.inner.HandleUDPPacket(p, m)
 		return
 	}
+	if !t.reg.admitFrom(m.SrcIP) {
+		p.Drop()
+		return
+	}
 	ip := m.SrcIP.Unmap().String()
-	s, b := t.reg.admitIn(m.InUser, m.InName, ip, false)
+	s := t.reg.admitIn(m.InUser, m.InName, ip)
 	if s == nil {
 		p.Drop()
 		return
 	}
-	n := int64(len(p.Data()))
-	s.countIn(b, n, 0)
-	f := s.flowOf(ip, m.InName, m.RemoteAddress(), t.reg.now())
-	if f != nil {
-		f.up.Add(n)
+	if t.reg.torrentWatch(s) {
+		if kind := torrentUDP(p.Data()); kind != "" {
+			t.reg.caught(s, ip, m.InName, "udp", kind, m.RemoteAddress())
+			p.Drop()
+			return
+		}
 	}
-	t.inner.HandleUDPPacket(&countingPacket{UDPPacket: p, slot: s, bucket: b, flow: f}, m)
+	// The core holds the session to the user's speed, both ways, and counts it to its site
+	// as it ends, like a TCP connection.
+	t.inner.HandleUDPPacket(p, m)
 }
 
 func (t *Tunnel) NatTable() C.NatTable { return t.inner.NatTable() }
-
-// userOf is who opened the connection. mihomo 1.19.31 leaves metadata.InUser empty for
-// Mieru (fixed upstream later); the Mieru connection itself still knows the user.
-func userOf(conn net.Conn, m *C.Metadata) string {
-	if m.InUser == "" && m.Type == C.MIERU {
-		if u, ok := conn.(interface{ UserName() string }); ok {
-			return u.UserName()
-		}
-	}
-	return m.InUser
-}
-
-// countingConn: Read from the client is upload, Write to the client is download.
-// UnwrapReader/UnwrapWriter must return []N.CountFunc (an alias of sing's type), so that
-// sing's copy loop still counts bytes when it switches to splice (XTLS Vision).
-// Upstream() is deliberately absent: exposing it would let sing bypass the counters.
-type countingConn struct {
-	net.Conn
-	slot   *slot
-	bucket *bucket // the traffic pool it counts to; nil: the main quota
-	inName string
-	ip     string
-	now    func() time.Time
-	once   sync.Once
-
-	// For the connection log (connlog.go); host is guarded by slot.mu.
-	dest     string
-	host     string // the site's name the sniffer read, when dest is a bare IP
-	started  time.Time
-	up, down atomic.Int64
-}
-
-func (c *countingConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b)
-	if n > 0 {
-		c.slot.countIn(c.bucket, int64(n), 0)
-		c.up.Add(int64(n))
-	}
-	return n, err
-}
-
-func (c *countingConn) Write(b []byte) (int, error) {
-	n, err := c.Conn.Write(b)
-	if n > 0 {
-		c.slot.countIn(c.bucket, 0, int64(n))
-		c.down.Add(int64(n))
-	}
-	return n, err
-}
-
-func (c *countingConn) UnwrapReader() (io.Reader, []N.CountFunc) {
-	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, n, 0); c.up.Add(n) }}
-}
-
-func (c *countingConn) UnwrapWriter() (io.Writer, []N.CountFunc) {
-	return c.Conn, []N.CountFunc{func(n int64) { c.slot.countIn(c.bucket, 0, n); c.down.Add(n) }}
-}
-
-func (c *countingConn) Close() error {
-	c.once.Do(func() { c.slot.closeConn(c, c.now()) })
-	return c.Conn.Close()
-}
-
-type countingPacket struct {
-	C.UDPPacket
-	slot   *slot
-	bucket *bucket
-	flow   *udpFlow // its line in the connection log; nil for a shared listener
-}
-
-func (p *countingPacket) WriteBack(b []byte, addr net.Addr) (int, error) {
-	n, err := p.UDPPacket.WriteBack(b, addr)
-	if n > 0 {
-		p.slot.countIn(p.bucket, 0, int64(n))
-		if p.flow != nil {
-			p.flow.down.Add(int64(n))
-		}
-	}
-	return n, err
-}

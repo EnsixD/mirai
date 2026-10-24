@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"time"
+
+	"mirai/internal/panel/domain"
+	"mirai/internal/panel/settings"
 )
 
 // What only grows is cut here, every ten minutes with the rest of the housekeeping. The
@@ -22,6 +25,12 @@ func (p *Panel) maintain(ctx context.Context) {
 	if err := p.st.Q.PruneTrafficDaily(ctx, now.Add(-trafficDailyKeep).Unix()/86400); err != nil {
 		p.log.Error("prune daily traffic", "err", err)
 	}
+	if err := p.st.Q.PruneNodeTrafficDaily(ctx, now.Add(-trafficDailyKeep).Unix()/86400); err != nil {
+		p.log.Error("prune daily node traffic", "err", err)
+	}
+	if _, err := p.st.Q.PruneUserSites(ctx, domain.SiteDay(now.AddDate(0, 0, -domain.DetailDays(ctx, settings.New(p.st.Q))))); err != nil {
+		p.log.Error("prune user sites", "err", err)
+	}
 	if _, err := p.st.Q.PruneAudit(ctx, now.Add(-auditKeep).Unix()); err != nil {
 		p.log.Error("prune audit log", "err", err)
 	}
@@ -29,5 +38,13 @@ func (p *Panel) maintain(ctx context.Context) {
 		p.log.Error("forget idle devices", "err", err)
 	} else if n > 0 {
 		p.log.Info("forgot idle devices", "count", n)
+	}
+	if n, err := p.devices.ExpireExtra(ctx); err != nil {
+		p.log.Error("expire bought device places", "err", err)
+	} else if n > 0 {
+		p.log.Info("bought device places ended with their term", "subscriptions", n)
+	}
+	if err := p.devices.Prune(ctx); err != nil {
+		p.log.Error("prune device pauses and unbinds", "err", err)
 	}
 }

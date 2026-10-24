@@ -25,13 +25,13 @@ unexpected() {
 case "$1" in
   pull)
     [ $# = 2 ] || unexpected "$@"
-    case "$2" in new-image | postgres:18-alpine@sha256:*) exit 0 ;; *) unexpected "$@" ;; esac ;;
+    case "$2" in new-image | next-image | postgres:18-alpine@sha256:*) exit 0 ;; *) unexpected "$@" ;; esac ;;
   run)
     # setup::image_version: the sandboxed `IMAGE version`, answered per image
     last='' image=''
     for a in "$@"; do image=$last; last=$a; done
     [ "$last" = version ] || unexpected "$@"
-    case "$image" in new-image) echo 0.5.0.1 ;; *) unexpected "$@" ;; esac
+    case "$image" in new-image) echo 0.5.0.1 ;; next-image) echo 0.5.1.0 ;; *) unexpected "$@" ;; esac
     exit 0 ;;
   image)
     # the database's image is never there yet: the update pulls it
@@ -45,7 +45,8 @@ case "$1" in
 esac
 [ "$2 $3" = '--project-directory /opt/mirai' ] || unexpected "$@"
 shift 3
-new() { grep -q "^MIRAI_IMAGE=new-image" /opt/mirai/.env; }
+# The settings the updater means to run: config.json, which it writes before any start.
+new() { grep -q "\"MIRAI_IMAGE\": \"new-image\"" /opt/mirai/config.json; }
 db='run --rm --no-deps -T --name mirai-database-'
 case "$*" in
   'exec -T panel mirai admin backup /data/panel/backup.db')
@@ -93,7 +94,8 @@ fixture() {
   rm -rf /opt/mirai
   mkdir -p /opt/mirai/data/panel /opt/mirai/data/node
   printf 'MIRAI_IMAGE=old-image\nMIRAI_VERSION=0.4.4\nPANEL_PORT=21355\n' >/opt/mirai/.env
-  printf 'legacy compose\n' >/opt/mirai/compose.yaml
+  # As a compose.yaml of before takes its settings: from .env, by ${...}.
+  printf 'legacy compose: image ${MIRAI_IMAGE}\n' >/opt/mirai/compose.yaml
   printf 'original users, payment42\n' >/opt/mirai/data/panel/mirai.db
   printf 'last WAL transaction\n' >/opt/mirai/data/panel/mirai.db-wal
   rm -f "$tmp/pg" "$tmp/trace" "$tmp/healthy" "$tmp/start-fail" "$tmp/pg-fail" "$tmp/migrate-fail" \
@@ -112,6 +114,14 @@ pg_fixture() {
 at() { grep -n -- "$1" "$tmp/trace" | head -1 | cut -d: -f1; }
 last() { grep -n -- "$1" "$tmp/trace" | tail -1 | cut -d: -f1; }
 
+# 0.5.1.0 and later no longer move SQLite: named by hand, it is refused before anything stops.
+fixture
+if "$bin" update next-image >"$tmp/output" 2>&1; then echo 'a move by a release that cannot make it must fail' >&2; exit 1; fi
+grep -q 'update to mirai 0.5.0.4 first' "$tmp/output"
+grep -q 'MIRAI_IMAGE=old-image' /opt/mirai/.env
+grep -q 'original users' /opt/mirai/data/panel/mirai.db
+if grep -q 'stop\|admin backup' "$tmp/trace"; then echo 'unexpected: the refused move changed something' >&2; exit 1; fi
+
 fixture
 touch "$tmp/pg-fail"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'startup fault must fail' >&2; exit 1; fi
@@ -122,14 +132,19 @@ grep -q 'legacy compose' /opt/mirai/compose.yaml
 grep -q 'original users' /opt/mirai/data/panel/mirai.db
 grep -q 'stop postgres' "$tmp/trace"
 [ -e "$tmp/healthy" ]
-# The database volume may already be initialized with this password: it must survive.
-password=$(grep '^MIRAI_POSTGRES_PASSWORD=' /opt/mirai/.env)
+# The database volume may already be initialized with this password: it must survive, in
+# secrets/ and in the .env that 0.4.4 runs on again, which the retry reads.
+password=$(cat /opt/mirai/secrets/postgres_password)
 [ -n "$password" ]
-if grep -q 'MIRAI_DATABASE_URL=' /opt/mirai/.env; then echo 'unexpected: MIRAI_DATABASE_URL=' >&2; exit 1; fi
+grep -qx "MIRAI_POSTGRES_PASSWORD=$password" /opt/mirai/.env
+if [ -s /opt/mirai/secrets/database_url ] || grep -q 'MIRAI_DATABASE_URL=' /opt/mirai/.env; then echo 'unexpected: a database address' >&2; exit 1; fi
 rm "$tmp/pg-fail" "$tmp/trace"
 "$bin" update new-image >"$tmp/output" 2>&1
-grep -qx "$password" /opt/mirai/.env
-grep -q "MIRAI_DATABASE_URL=postgresql://mirai:${password#MIRAI_POSTGRES_PASSWORD=}@" /opt/mirai/.env
+# The new version runs on config.json and secrets/; the .env from before is gone.
+[ ! -e /opt/mirai/.env ]
+grep -q "\"MIRAI_IMAGE\": \"new-image\"" /opt/mirai/config.json
+[ "$(cat /opt/mirai/secrets/postgres_password)" = "$password" ]
+grep -q "postgresql://mirai:${password}@" /opt/mirai/secrets/database_url
 [ -e "$tmp/healthy" ]
 # The database's image is pulled before the backup and the stop, not by `compose up`.
 pull=$(at 'pull postgres:18-alpine@sha256:')
@@ -187,15 +202,19 @@ pg_fixture
 touch "$tmp/start-fail-new"
 echo '1 -> 2' >"$tmp/schema"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'startup fault must fail' >&2; exit 1; fi
-grep -q 'MIRAI_IMAGE=new-image' /opt/mirai/.env
+grep -q '"MIRAI_IMAGE": "new-image"' /opt/mirai/config.json
+# What stays is the new release's: config.json and secrets/, and no .env of before for
+# the next update to read the server by.
+[ ! -e /opt/mirai/.env ]
 [ ! -e "$tmp/healthy" ]
 grep -q 'No automatic database rollback is safe' "$tmp/output"
 
 fixture
 touch "$tmp/migrate-fail"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'lost migration response must fail' >&2; exit 1; fi
-grep -q 'MIRAI_IMAGE=new-image' /opt/mirai/.env
-grep -q 'MIRAI_DATABASE_URL=' /opt/mirai/.env
+grep -q '"MIRAI_IMAGE": "new-image"' /opt/mirai/config.json
+[ ! -e /opt/mirai/.env ]
+[ -s /opt/mirai/secrets/database_url ]
 [ ! -e "$tmp/healthy" ]
 echo 'new post-import payment43' >>"$tmp/pg"
 rm "$tmp/migrate-fail"
@@ -210,7 +229,8 @@ ls /opt/mirai/backups | grep -q '^pre-update-'
 fixture
 touch "$tmp/start-fail"
 if "$bin" update new-image >"$tmp/output" 2>&1; then echo 'panel startup fault must fail' >&2; exit 1; fi
-grep -q 'MIRAI_IMAGE=new-image' /opt/mirai/.env
+grep -q '"MIRAI_IMAGE": "new-image"' /opt/mirai/config.json
+[ ! -e /opt/mirai/.env ]
 grep -q 'imported users' "$tmp/pg"
 [ ! -e "$tmp/healthy" ]
 grep -q 'No automatic database rollback is safe' "$tmp/output"
@@ -244,16 +264,18 @@ grep -q 'live users, payment77' "$tmp/pg"
 [ ! -e /opt/mirai/data/panel/restore.dump ]
 
 # A database-only archive (what the panel sends to Telegram, after age -d) puts the dump
-# back and keeps the server's own files: .env, certificates, node data.
+# back and keeps the server's own settings (moved from .env to config.json and secrets/ as
+# the panel starts on them), certificates and node data.
 pg_fixture
-env_before=$(sha256sum /opt/mirai/.env)
 mkdir -p "$tmp/dbonly/data/panel"
 echo 'telegram users, payment99' >"$tmp/dbonly/data/panel/backup.dump"
 tar -czf "$tmp/dbonly.tar.gz" -C "$tmp/dbonly" data
 "$bin" restore -y "$tmp/dbonly.tar.gz" >"$tmp/output" 2>&1
 grep -q 'telegram users, payment99' "$tmp/pg"
 grep -q "holds only the panel's database" "$tmp/output"
-[ "$(sha256sum /opt/mirai/.env)" = "$env_before" ]
+grep -q '"MIRAI_IMAGE": "old-image"' /opt/mirai/config.json
+[ "$(cat /opt/mirai/secrets/postgres_password)" = livepassword ]
+grep -q 'postgresql://mirai:livepassword@' /opt/mirai/secrets/database_url
 [ ! -e /opt/mirai/data/panel/restore.dump ]
 [ -e "$tmp/healthy" ]
 tar -tzf /opt/mirai/backups/pre-restore-*.tar.gz | grep -qx 'data/panel/backup.dump'
@@ -271,4 +293,4 @@ grep -q 'MIRAI_POSTGRES_PASSWORD=kept' /opt/mirai/.env
 if grep -q 'database restore\|postgres' "$tmp/trace"; then echo 'unexpected: PostgreSQL on an SQLite restore' >&2; exit 1; fi
 [ -e "$tmp/healthy" ]
 strict
-echo 'host updater: strict docker, provisioning rollback, kept database password, PostgreSQL image pulled first, final dump after the stop, PostgreSQL rollback on a failed migration and on an unchanged schema, uncertain commit retry, preserved post-import writes and SQLite archive, startup failure and writer-stop order, restore without a dump left behind, restore without a database snapshot, database-only restore, SQLite restore passed'
+echo 'host updater: strict docker, provisioning rollback, kept database password, PostgreSQL image pulled first, final dump after the stop, PostgreSQL rollback on a failed migration and on an unchanged schema, uncertain commit retry, preserved post-import writes and SQLite archive, startup failure and writer-stop order, restore without a dump left behind, restore without a database snapshot, database-only restore, SQLite restore, no SQLite move by 0.5.1.0 passed'
