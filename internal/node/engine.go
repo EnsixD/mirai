@@ -73,6 +73,9 @@ type Engine struct {
 	sys *sysSampler
 
 	routes string // routesKey of what tunnel's proxies and rules hold now
+
+	fwd forwards // TCP pass-throughs (DesiredState.Forwards)
+
 	warpMu sync.Mutex
 	warp   nodeapi.WarpStatus             // the last check, kept for a minute
 	probes map[string]nodeapi.ProbeResult // the same for the exits to other nodes
@@ -122,6 +125,7 @@ func Start(o Options) (*Engine, error) {
 		listeners: map[string]nodeapi.ListenerStatus{},
 		errs:      map[string]string{}, marker: make(chan string, 8), sys: newSysSampler(),
 	}
+	e.fwd.log = log
 	go e.pumpLogs()
 
 	cs, err := loadCounters(filepath.Join(dataDir, countersFile), log)
@@ -261,6 +265,8 @@ func (e *Engine) Apply(st nodeapi.DesiredState) (nodeapi.ApplyResult, error) {
 		listener.PatchInboundListeners(failed, e.tun, true)
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Name < statuses[j].Name })
+	// A port it cannot bind is in the node's log: the statuses are the inbounds'.
+	e.fwd.apply(st.Forwards)
 
 	e.applied = st
 	e.listeners = map[string]nodeapi.ListenerStatus{}

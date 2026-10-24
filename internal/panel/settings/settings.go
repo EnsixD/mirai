@@ -12,6 +12,10 @@ import (
 	"mirai/internal/release"
 )
 
+// KeySubRelayNode is the node whose 443 and 80 pass through to the panel (0: none), for
+// the subscription domain to point to where the panel's own address is blocked.
+const KeySubRelayNode = "sub_relay_node"
+
 const (
 	KeyAdminPath  = "admin_path"
 	KeySubPath    = "sub_path"

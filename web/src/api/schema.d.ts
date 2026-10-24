@@ -2296,6 +2296,11 @@ export interface components {
              * @description Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать
              */
             sub_port?: number;
+            /**
+             * Format: int64
+             * @description Нода для выдачи подписок (удалённая); 0 — напрямую с панели
+             */
+            sub_relay_node?: number;
             sub_public_url?: string;
             /** @enum {string} */
             sub_routing?: "ru_direct" | "all";
@@ -2728,6 +2733,11 @@ export interface components {
             sub_port: number;
             /** @description sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели */
             sub_port_error?: string;
+            /**
+             * Format: int64
+             * @description Нода, через которую отдаются подписки: её 443 и 80 пробрасываются на панель, домен подписки направляют на неё; 0 — напрямую
+             */
+            sub_relay_node: number;
             sub_public_url: string;
             /**
              * @description Маршруты в Clash-приложениях: ru_direct — российские сайты и IP напрямую по геобазам mihomo, all — всё через VPN

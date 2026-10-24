@@ -285,6 +285,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 			return subs.Config{}, err
 		}
 		cfg.SubBase = subBase(ctx)
+		relayNode, _, err := settings.Get[int64](ctx, set, settings.KeySubRelayNode)
+		if err != nil {
+			return subs.Config{}, err
+		}
+		_, perr := netip.ParseAddr(strings.Trim(publicHost, "[]"))
+		publicHostIP := perr == nil
 		var legacyKind string
 		if legacyKind, err = set.String(ctx, settings.KeyLegacySubKind); err != nil {
 			return subs.Config{}, err
@@ -311,6 +317,12 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 				continue
 			}
 			sn := subs.Node{ID: n.ID, Name: n.Name, Endpoint: subs.Endpoint{Host: ep.Host, SNI: domainName}}
+			// With a subscription node the domain points to that node, which passes only
+			// 443 and 80 on: the panel's own inbounds are reached at its address, under
+			// the same name for TLS.
+			if n.Address == "" && relayNode != 0 && publicHostIP {
+				sn.Endpoint.Host = publicHost
+			}
 			if n.Address != "" {
 				sn.Endpoint = subs.Endpoint{Host: domain.NodeHost(n), SNI: n.Domain}
 				cfg.Direct = append(cfg.Direct, n.PublicHost, n.Domain)

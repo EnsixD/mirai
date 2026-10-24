@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -179,6 +180,9 @@ func (s *Syncer) desired(ctx context.Context) (nodeapi.DesiredState, error) {
 		return st, err
 	}
 	if st.Relay, st.Exits, err = s.cascade(ctx, n, inbounds); err != nil {
+		return st, err
+	}
+	if st.Forwards, err = s.subscriptionRelay(ctx, n); err != nil {
 		return st, err
 	}
 	if s.local {
@@ -655,6 +659,41 @@ func (s *Syncer) refreshHealth(ctx context.Context) {
 	}
 }
 
+// subscriptionRelay is what node n forwards when it is the subscription node
+// (settings.KeySubRelayNode): its 443 and 80 pass through to the panel's own address, so
+// subscriptions and the certificate renewals reach the panel through the node, whose
+// address the domain then points to. The panel's address must be an IP: a name could be
+// that very domain, and the node would forward to itself.
+func (s *Syncer) subscriptionRelay(ctx context.Context, n db.Node) ([]nodeapi.Forward, error) {
+	if s.local || n.Enabled == 0 {
+		return nil, nil
+	}
+	id, _, err := settings.Get[int64](ctx, s.m.set, settings.KeySubRelayNode)
+	if err != nil || id != n.ID {
+		return nil, err
+	}
+	host, err := s.m.set.String(ctx, settings.KeyPublicHost)
+	if err != nil {
+		return nil, err
+	}
+	ip, perr := netip.ParseAddr(strings.Trim(host, "[]"))
+	if perr != nil {
+		s.log.Warn("subscription relay needs the panel's address as an IP", "public_host", host)
+		return nil, nil
+	}
+	port, _, err := settings.Get[int](ctx, s.m.set, settings.KeyPanelPort)
+	if err != nil {
+		return nil, err
+	}
+	if port == 0 {
+		port = 443
+	}
+	return []nodeapi.Forward{
+		{Listen: ":443", Target: netip.AddrPortFrom(ip, uint16(port)).String()},
+		{Listen: ":80", Target: netip.AddrPortFrom(ip, 80).String()},
+	}, nil
+}
+
 func stateKey(st nodeapi.DesiredState) string {
 	raw, _ := json.Marshal(struct {
 		I []nodeapi.Inbound
@@ -664,7 +703,8 @@ func stateKey(st nodeapi.DesiredState) string {
 		W *nodeapi.Warp
 		R *nodeapi.Relay
 		E []nodeapi.Exit
-	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits})
+		F []nodeapi.Forward `json:",omitempty"` // absent on most nodes: their key stays as it was
+	}{st.Inbounds, st.Slots, st.TLS, st.SelfStealPort, st.Warp, st.Relay, st.Exits, st.Forwards})
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

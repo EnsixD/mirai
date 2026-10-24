@@ -7,6 +7,7 @@ import { t } from "../../../i18n";
 import { useDraft } from "../../../lib/draft";
 import { fieldErrors } from "../../../lib/fields";
 import { FingerprintSelect } from "../../../components/fingerprint-select";
+import { Select } from "../../../components/select";
 import { useSaveSettings } from "./shared";
 
 // Ports the installer opens in the firewall (443 and the HTTPS pool): a subscription
@@ -98,7 +99,65 @@ export function SubPortCard({ s }: { s: Schemas["SettingsView"] }) {
         </div>
       </form>
       <form className="mt-6 border-t border-[var(--line)] pt-5" onSubmit={e=>{e.preventDefault();save.mutate({sub_public_url:address.draft.url.trim(),sub_id_length:address.draft.length});}}><h3 className="font-semibold mb-3">Адрес и ID подписки</h3><Field label="Публичный адрес" error={fieldErrors(save.error).sub_public_url} hint="Домен или IP с HTTP/HTTPS, без дополнительного пути. A/AAAA-запись проверяется при сохранении и должна указывать на этот сервер; HTTPS требует сертификат. Для HTTP используйте отдельный порт подписок или прокси. Пусто — адрес по умолчанию. Для ссылки без служебного пути укажите https://subs.example.com."><input className="input" value={address.draft.url} placeholder="https://subs.example.com" onChange={e=>address.setDraft({...address.draft,url:e.target.value})}/></Field><Field label="Длина ID новых подписок" hint="Случайные латинские буквы и цифры, 9–32 символа. Существующие ID не меняются."><input className="input" type="number" min={9} max={32} value={address.draft.length} onChange={e=>address.setDraft({...address.draft,length:Number(e.target.value)})}/></Field><p className="mono text-xs my-3 break-all">{address.draft.url.trim()||s.sub_base_url.replace(/\/$/,"")}/{"A7b2X9mQ4".padEnd(address.draft.length,"x").slice(0,address.draft.length)}</p><Button type="submit" disabled={!address.dirty||address.draft.length<9||address.draft.length>32} loading={save.isPending}>Сохранить адрес</Button></form>
+      <SubRelayNode s={s} />
     </section>
+  );
+}
+
+// Subscriptions through a node, where an operator blocks the panel's own address: the
+// node passes 443 and 80 through to the panel untouched (its certificate, its renewals),
+// and the subscription domain points to the node. Links stay as they are.
+function SubRelayNode({ s }: { s: Schemas["SettingsView"] }) {
+  const save = useSaveSettings();
+  const nodes = useNodes();
+  const [pick, setPick] = useState<number | null>(null);
+  const chosen = pick ?? s.sub_relay_node ?? 0;
+  const remote = (nodes.data ?? []).filter((n) => !n.local);
+  const node = remote.find((n) => n.id === chosen);
+  const domain = (() => {
+    try {
+      return new URL(s.sub_public_url || s.sub_base_url).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  const error = fieldErrors(save.error).sub_relay_node;
+  return (
+    <form
+      className="mt-6 border-t border-[var(--line)] pt-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate({ sub_relay_node: chosen }, { onSuccess: () => setPick(null) });
+      }}
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="font-semibold">Выдача подписок через ноду</h3>
+        {s.sub_relay_node ? <Pill tone="ok">через {remote.find((n) => n.id === s.sub_relay_node)?.name || `ноду ${s.sub_relay_node}`}</Pill> : null}
+      </div>
+      <Field
+        label="Нода"
+        htmlFor="s-sub-relay"
+        error={error ? "Выберите удалённую ноду" : undefined}
+        hint="Если оператор режет адрес сервера панели: выбранная нода пробрасывает порты 443 и 80 на панель как есть — сертификат и его продление остаются панельными. Ссылки подписок не меняются, подключения ноды панели клиенты получают по её IP."
+      >
+        <Select id="s-sub-relay" value={String(chosen)} onChange={(e) => setPick(Number(e.target.value))}>
+          <option value="0">Напрямую с панели</option>
+          {remote.map((n) => (
+            <option key={n.id} value={String(n.id)} disabled={!n.enabled}>
+              {(n.name || n.host) + (n.host ? ` · ${n.host}` : "")}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {chosen && node ? (
+        <div className="panel-soft mb-4 p-3 text-[13px]">
+          После сохранения направьте A-запись <span className="mono">{domain || "домена подписки"}</span> на адрес ноды <span className="mono">{node.host}</span> (его IP). Пока запись указывает на панель, всё работает как раньше.
+        </div>
+      ) : null}
+      <Button type="submit" disabled={chosen === (s.sub_relay_node ?? 0)} loading={save.isPending && save.variables?.sub_relay_node !== undefined}>
+        Сохранить ноду
+      </Button>
+    </form>
   );
 }
 

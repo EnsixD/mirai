@@ -2736,6 +2736,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sub_relay_node": {
+            "description": "Нода для выдачи подписок (удалённая); 0 — напрямую с панели",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "sub_public_url": {
             "maxLength": 500,
             "type": "string"
@@ -3898,6 +3904,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "sub_relay_node": {
+            "description": "Нода, через которую отдаются подписки: её 443 и 80 пробрасываются на панель, домен подписки направляют на неё; 0 — напрямую",
+            "format": "int64",
+            "type": "integer"
+          },
           "sub_port_error": {
             "description": "sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели",
             "type": "string"
@@ -3937,6 +3948,7 @@
           "domain",
           "panel_port",
           "sub_port",
+          "sub_relay_node",
           "quiet_hour_utc",
           "admin_url",
           "sub_base_url",

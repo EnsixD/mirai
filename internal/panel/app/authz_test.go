@@ -100,7 +100,7 @@ func TestFullKeyCannotTakeOverThePanel(t *testing.T) {
 	// Fields of endpoints a key may use: the address of the panel, where clients connect,
 	// the rules and the support link are the session's; the rest is not.
 	for field, body := range map[string]map[string]any{
-		"public_host": {"public_host": "attacker.example"}, "domain": {"domain": "attacker.example"}, "sub_port": {"sub_port": 8443},
+		"public_host": {"public_host": "attacker.example"}, "domain": {"domain": "attacker.example"}, "sub_port": {"sub_port": 8443}, "sub_relay_node": {"sub_relay_node": 1},
 		"sub_rules": {"sub_rules": "DOMAIN,evil.example,DIRECT"}, "support_url": {"support_url": "https://evil.example"},
 		// What every subscriber's app shows.
 		"sub_announce": {"sub_announce": "Pay here"}, "sub_announce_url": {"sub_announce_url": "https://evil.example"},

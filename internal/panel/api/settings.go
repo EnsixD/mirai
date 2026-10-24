@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net"
 	"net/http"
@@ -40,6 +41,7 @@ type SettingsView struct {
 	PanelPort    int      `json:"panel_port"`
 	SubPort      int      `json:"sub_port" doc:"Отдельный порт подписок; 0 — порт панели. Порт панели отдаёт подписки в любом случае"`
 	SubPortError string   `json:"sub_port_error,omitempty" doc:"sub_port_busy — сохранённый порт занят на сервере, подписки пока идут через порт панели"`
+	SubRelayNode int64    `json:"sub_relay_node" doc:"Нода, через которую отдаются подписки: её 443 и 80 пробрасываются на панель, домен подписки направляют на неё; 0 — напрямую"`
 	QuietHourUTC int      `json:"quiet_hour_utc" doc:"Час (UTC), когда пополняется пул слотов: переподключение QUIC-клиентов"`
 	AdminURL     string   `json:"admin_url"`
 	SubBaseURL   string   `json:"sub_base_url"`
@@ -87,6 +89,7 @@ type patchSettingsInput struct {
 		RequireHWID   *bool   `json:"device_require_hwid,omitempty"`
 		DefaultLang   *string `json:"default_lang,omitempty" enum:"auto,ru,en"`
 		SubPort       *int    `json:"sub_port,omitempty" minimum:"0" maximum:"65535" doc:"Отдельный порт подписок на сервере панели; 0 — убрать. Ссылки переезжают на него, старые продолжают работать"`
+		SubRelayNode  *int64  `json:"sub_relay_node,omitempty" minimum:"0" doc:"Нода для выдачи подписок (удалённая); 0 — напрямую с панели"`
 	}
 }
 
@@ -165,6 +168,9 @@ func (h *handlers) readSettings(ctx context.Context) (SettingsView, error) {
 	if v.SubPort > 0 && h.d.SubPortError != nil {
 		v.SubPortError = h.d.SubPortError()
 	}
+	if v.SubRelayNode, _, err = settings.Get[int64](ctx, h.d.Settings, settings.KeySubRelayNode); err != nil {
+		return v, err
+	}
 	if v.QuietHourUTC, _, err = settings.Get[int](ctx, h.d.Settings, settings.KeyQuietHour); err != nil {
 		return v, err
 	}
@@ -235,7 +241,9 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 		if _, err := netip.ParseAddr(u.Hostname()); err != nil {
 			host, _ := h.d.Settings.String(ctx, settings.KeyPublicHost)
-			if detail := h.domainHere(ctx, "body.sub_public_url", u.Hostname(), dnscheck.Own(host)); detail != nil {
+			own := dnscheck.Own(host)
+			own = append(own, h.subRelayAddrs(ctx, b.SubRelayNode)...)
+			if detail := h.domainHere(ctx, "body.sub_public_url", u.Hostname(), own); detail != nil {
 				return nil, huma.Error422UnprocessableEntity("validation", detail)
 			}
 		}
@@ -254,7 +262,7 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 	}
 	// Where clients are sent, and what they are told to trust: a leaked API key must not
 	// move subscriptions to another server or add rules to every client.
-	for field, touched := range map[string]bool{"sub_public_url": b.SubPublicURL != nil, "sub_id_length": b.SubIDLength != nil, "public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil,
+	for field, touched := range map[string]bool{"sub_public_url": b.SubPublicURL != nil, "sub_id_length": b.SubIDLength != nil, "public_host": b.PublicHost != nil, "domain": b.Domain != nil, "sub_port": b.SubPort != nil, "sub_relay_node": b.SubRelayNode != nil,
 		"sub_happ_rules": b.HappRules != nil, "sub_incy_rules": b.INCYRules != nil, "sub_rules": b.SubRules != nil, "support_url": b.SupportURL != nil,
 		// What every subscriber's app shows: text, links and the logo it downloads.
 		"sub_announce": b.Announce != nil, "sub_announce_url": b.AnnounceURL != nil, "app_branding": b.AppBranding != nil,
@@ -334,6 +342,16 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 			details = append(details, d)
 		}
 	}
+	if b.SubRelayNode != nil && *b.SubRelayNode > 0 {
+		// Only a remote node can stand in for the panel: the panel's own already is it.
+		n, err := h.d.Store.Q.GetNode(ctx, *b.SubRelayNode)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if err != nil || n.Address == "" {
+			details = append(details, &huma.ErrorDetail{Location: "body.sub_relay_node", Message: "sub_relay_node_invalid", Value: *b.SubRelayNode})
+		}
+	}
 	// The domain must lead to this server: checked when it or the server's address changes,
 	// after the cheap checks, since it asks public DNS.
 	if (b.Domain != nil || b.PublicHost != nil) && len(details) == 0 {
@@ -387,6 +405,11 @@ func (h *handlers) updateSettings(ctx context.Context, in *patchSettingsInput) (
 		}
 		if b.SubPort != nil {
 			if err := settings.Set(ctx, set, settings.KeySubPort, *b.SubPort); err != nil {
+				return err
+			}
+		}
+		if b.SubRelayNode != nil {
+			if err := settings.Set(ctx, set, settings.KeySubRelayNode, *b.SubRelayNode); err != nil {
 				return err
 			}
 		}
@@ -575,4 +598,21 @@ func (h *handlers) resetAdminPath(ctx context.Context, _ *struct{}) (*resetPathO
 	out := &resetPathOutput{}
 	out.Body.AdminURL = v.AdminURL
 	return out, nil
+}
+
+// subRelayAddrs is where the subscription node is (settings.KeySubRelayNode): the one
+// being saved when set, else the saved one. The subscription domain may point there.
+func (h *handlers) subRelayAddrs(ctx context.Context, next *int64) []netip.Addr {
+	id, _, _ := settings.Get[int64](ctx, h.d.Settings, settings.KeySubRelayNode)
+	if next != nil {
+		id = *next
+	}
+	if id <= 0 {
+		return nil
+	}
+	n, err := h.d.Store.Q.GetNode(ctx, id)
+	if err != nil || n.Address == "" {
+		return nil
+	}
+	return h.nodeAddrs(ctx, domain.NodeHost(n))
 }

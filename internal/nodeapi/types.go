@@ -36,6 +36,15 @@ type DesiredState struct {
 	// Exits are the other nodes this one sends chosen inbounds through (a cascade).
 	Relay *Relay `json:"relay,omitempty"`
 	Exits []Exit `json:"exits,omitempty"`
+	// Forwards are TCP ports the node passes through to another host as they are, TLS
+	// and all: a node that stands in for the panel's address where that one is blocked.
+	Forwards []Forward `json:"forwards,omitempty"`
+}
+
+// Forward passes connections to Listen (":443") through to Target ("203.0.113.7:443").
+type Forward struct {
+	Listen string `json:"listen"`
+	Target string `json:"target"`
 }
 
 type Inbound struct {

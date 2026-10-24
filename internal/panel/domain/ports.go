@@ -22,7 +22,7 @@ const (
 	PortInbound = "inbound"  // an inbound of the node
 	PortRelay   = "relay"    // the cascade relay other nodes leave through
 	PortPanel   = "panel"    // the panel's own HTTPS, on the panel's node
-	PortSub     = "sub"      // the subscription port, on the panel's node
+	PortSub     = "sub"      // the subscription port: on the panel's node, and 443/80 on the subscription node
 	PortNodeAPI = "node_api" // the node API the panel connects to, on a remote node
 )
 
@@ -93,8 +93,19 @@ func NodePorts(ctx context.Context, q *db.Queries, node db.Node) (PortMap, error
 		} else if os.Getenv("MIRAI_PANEL_LISTEN") == "" {
 			m.add(PortHolder{Kind: PortPanel}, "2053", "tcp", false)
 		}
-	} else if _, p, err := net.SplitHostPort(node.Address); err == nil {
-		m.add(PortHolder{Kind: PortNodeAPI}, p, "tcp", false)
+	} else {
+		if _, p, err := net.SplitHostPort(node.Address); err == nil {
+			m.add(PortHolder{Kind: PortNodeAPI}, p, "tcp", false)
+		}
+		// The subscription node passes 443 and 80 through to the panel (nodesync).
+		relay, _, err := settings.Get[int64](ctx, settings.New(q), settings.KeySubRelayNode)
+		if err != nil {
+			return PortMap{}, err
+		}
+		if relay == node.ID {
+			m.add(PortHolder{Kind: PortSub}, "443", "tcp", false)
+			m.add(PortHolder{Kind: PortSub}, "80", "tcp", false)
+		}
 	}
 	r, err := q.GetNodeRelay(ctx, node.ID)
 	switch {
