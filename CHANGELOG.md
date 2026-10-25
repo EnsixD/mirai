@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.2
+### en
+- **A node added from the command line starts empty too** (`mirai admin node add`): no default inbounds.
+### ru
+- **Нода, добавленная из командной строки, тоже пустая** (`mirai admin node add`): без стандартных подключений.
+
 ## 0.6.1
 ### en
 - **Links of the earlier Mirai panel keep working**: tokens of 9 to 32 characters, and `/<token>` at the root of the address.

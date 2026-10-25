@@ -14,7 +14,8 @@ import (
 
 // StarterContent makes Seed and new nodes come with the default inbounds and tariffs. The
 // panel turns it off at start: a fresh install and a new node are empty, the admin adds
-// what they serve. The tests keep it on, as their fixtures expect them.
+// what they serve; cmd/mirai turns it off for every command. The tests keep it on, as
+// their fixtures expect them.
 var StarterContent = true
 
 // Seed creates the default inbounds and tariffs (with StarterContent) and the slot pool
