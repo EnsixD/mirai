@@ -4,11 +4,16 @@ Each release has a section in English and in Russian; the release workflow puts 
 the signed manifest, and the panel shows the one in its language.
 
 ## 0.6.0
-
-- Mirai moves to the mikan code base (see NOTICE.md): renamed, own logo, commands `mirai` and `mirai-node`.
-- Windows in the middle of the screen instead of side sheets.
-- A fresh panel and a new node start without inbounds and tariffs.
-- Only the main protocols are offered: VLESS REALITY (XHTTP, gRPC, Vision), VLESS TLS (Vision, WebSocket), the CDN ones and Hysteria2.
+### en
+- **Mirai on the mikan code base** (see NOTICE.md): renamed, own logo, commands `mirai` and `mirai-node`.
+- **Windows in the middle of the screen** instead of side sheets.
+- **An empty start**: a fresh panel and a new node have no inbounds and no plans.
+- **Only the main protocols**: VLESS REALITY (XHTTP, gRPC, Vision), VLESS TLS (Vision, WebSocket), the CDN ones and Hysteria2.
+### ru
+- **Mirai на основе mikan** (см. NOTICE.md): своё название и логотип, команды `mirai` и `mirai-node`.
+- **Окна по центру экрана** вместо боковых панелей.
+- **Пустой старт**: у новой панели и новой ноды нет подключений и тарифов.
+- **Только основные протоколы**: VLESS REALITY (XHTTP, gRPC, Vision), VLESS TLS (Vision, WebSocket), CDN и Hysteria2.
 
 ## 0.5.2.0
 ### en
