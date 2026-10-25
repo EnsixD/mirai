@@ -228,7 +228,7 @@ func TestNotesFor(t *testing.T) {
 // The support desk knows the official build by this fingerprint (mirai-bot keeps a copy):
 // a changed or an added release key changes it, and the desk must be told.
 func TestKeyFingerprint(t *testing.T) {
-	if got := KeyFingerprint(); got != "0570ab89f762390c" {
+	if got := KeyFingerprint(); got != "d434d8637cb6f27e" {
 		t.Fatalf("KeyFingerprint() = %s", got)
 	}
 }

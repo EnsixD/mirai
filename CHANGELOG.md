@@ -3,6 +3,13 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.0
+
+- Mirai moves to the mikan code base (see NOTICE.md): renamed, own logo, commands `mirai` and `mirai-node`.
+- Windows in the middle of the screen instead of side sheets.
+- A fresh panel and a new node start without inbounds and tariffs.
+- Only the main protocols are offered: VLESS REALITY (XHTTP, gRPC, Vision), VLESS TLS (Vision, WebSocket), the CDN ones and Hysteria2.
+
 ## 0.5.2.0
 ### en
 - **API changes** (server groups and plans; for scripts and addons that call them): `POST /api/v1/tariffs/{id}/apply-pools` is gone, and `POST /api/v1/tariffs/{id}/apply` replaces it, with the flags `traffic`, `devices`, `speed` and `groups` (at least one; `groups` is what apply-pools did). The field `excluded` of `PoolSetting` (called `PoolLimit` before; the plan's `pools` and `PUT /api/v1/users/{id}/pools`) and of `UserPoolView` is gone: `mode` replaces it, one of `main`, `own`, `unlimited` and `closed`, and `traffic_limit` goes only with `own` (before: a limit, `null` for none, `excluded: true`; the update converts what exists). A plan's `pools` (`TariffView.pools`) now lists every group with its `mode`, not only the groups with a row of the plan, and a group that a plan's request leaves out is on the main traffic, where it used to be unlimited.
