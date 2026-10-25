@@ -3,7 +3,7 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
-## 0.7.0
+## 0.7.1
 ### en
 - **The 2trillion bot is back inside the panel**: our menu, profile, shop, banner and the admin menu in Telegram. It is switched on by the `ourbot_enabled` setting; then the panel does not poll Telegram itself and does not install the bot addon.
 ### ru
