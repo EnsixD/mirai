@@ -186,8 +186,9 @@ func (g *Gateway) Run(ctx context.Context) {
 			stop = nil
 		}
 		on, _ := g.d.Settings.On(ctx, Enabled)
+		ours, _ := g.d.Settings.On(ctx, settings.OurBot)
 		token, _ := g.d.Settings.String(ctx, KeyToken)
-		if !on || token == "" {
+		if !on || ours || token == "" {
 			g.setStatus(func(s *Status) { *s = Status{} })
 			return
 		}

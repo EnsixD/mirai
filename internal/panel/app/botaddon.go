@@ -46,6 +46,9 @@ func (b *botAddon) check(ctx context.Context) {
 	if p.Addons == nil || !p.Addons.Supported() {
 		return
 	}
+	if ours, _ := p.Settings.On(ctx, settings.OurBot); ours {
+		return // our own bot holds the token
+	}
 	on, _, err := settings.Get[bool](ctx, p.Settings, tgate.KeyEnabled)
 	if err != nil || !on || p.AddonsAPI.Slot(ctx) != "" {
 		return

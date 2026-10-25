@@ -142,6 +142,9 @@ type Switch struct {
 
 // The panel's switches.
 var (
+	// OurBot: the 2trillion bot (internal/panel/ourbot) holds the Telegram token; the
+	// gateway does not poll and no bot addon is installed by itself.
+	OurBot = Switch{"ourbot_enabled", false}
 	AutoPort       = Switch{KeyAutoPort, true}
 	AutoSNI        = Switch{KeyAutoSNI, true}
 	AnyPort        = Switch{KeyAnyPort, false}

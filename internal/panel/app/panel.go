@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"mirai/internal/panel/ourbot"
 	"net"
 	"net/http"
 	"net/netip"
@@ -69,6 +70,8 @@ type Panel struct {
 	// out; Telegram is the admin's setup of the bot, its notices and broadcasts on top of it.
 	Gateway  *tgate.Gateway
 	Telegram *botpanel.Panel
+	// OurBot is the 2trillion bot, on while settings.OurBot is.
+	OurBot   *ourbot.Bot
 	Billing  *billing.Service
 	Updates  *updates.Checker
 	Alerts   *infraalerts.Monitor
@@ -320,7 +323,9 @@ func NewPanel(st *store.Store, o Options) (*Panel, error) {
 	p.Gateway.SetHandler(p.AddonsAPI.BotSlot())
 	deps.Telegram, deps.Gateway = p.Telegram, p.Gateway
 	p.Support.SetNotifier(p.tellAdminOfSupport)
-	p.Billing.SetTelegram(p.Gateway)
+	p.OurBot = ourbot.New(ourbot.Deps{Store: st, Settings: set, Devices: deps.Devices, Users: deps.Users, SubBase: subBase,
+		MiniApp: func() bool { return o.Certs != nil && o.Certs.Trusted() }, Log: o.Log, Now: o.Now, Billing: p.Billing, Tunnel: tunnel})
+	p.Billing.SetTelegram(botSwitch{set: set, ours: p.OurBot, gate: p.Gateway})
 	p.Updates = updates.New(o.DataDir, o.Version, o.Releases, o.Log, o.Now)
 	deps.Updates = p.Updates
 	var certStatus infraalerts.CertificateSource
@@ -611,7 +616,7 @@ func (p *Panel) Run(ctx context.Context) {
 	if p.NodeUpdates != nil {
 		workers = append(workers, p.NodeUpdates.Run)
 	}
-	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.Billing.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
+	workers = append(workers, p.Gateway.Run, p.Telegram.Run, p.OurBot.Run, p.Billing.Run, p.AddonsAPI.Run, p.AddonsAPI.RunPush, (&botAddon{p: p}).Run, p.Updates.Run, p.Alerts.Run, p.Backups.Run, p.Importer.Run,
 		func(ctx context.Context) {
 			pace.Tick(ctx, 5*time.Second, func(ctx context.Context) {
 				if _, err := p.Apply(ctx); err != nil {
