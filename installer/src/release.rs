@@ -24,7 +24,7 @@ pub const CATALOG_KEY: &str = "Z4QfL07dI/IRReSe6Gr76UcxxPoy4i2GiClBv8RcNuo=";
 
 /// What a catalog's signature covers before its bytes (internal/release.CatalogContext): a
 /// signature made for another kind of document never passes for the catalog.
-pub const CATALOG_CONTEXT: &str = "mirai catalog v1\n";
+pub const CATALOG_CONTEXT: &str = "mikan catalog v1\n";
 
 /// Names the signature in a context next to its file (internal/release.SigSuffix); a release's
 /// own (".sig") is over the bytes alone.

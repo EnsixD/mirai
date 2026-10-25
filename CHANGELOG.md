@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.4
+### en
+- **Addons from the catalog install again**: the server command checks the catalog signature in the context of mikan, as the panel does.
+### ru
+- **Аддоны из каталога снова устанавливаются**: команда на сервере проверяет подпись каталога так же, как панель.
+
 ## 0.6.3
 ### en
 - **The addon catalog loads again**: the marketplace and community index signatures, the addon file name and the addon environment keep the names of mikan they are built for.
