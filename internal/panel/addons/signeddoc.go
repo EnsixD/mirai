@@ -21,6 +21,8 @@ const (
 	// docRetry is how long after a failed fetch the network is left alone: the copy at hand
 	// is used meanwhile, and the pages that read it do not wait on GitHub each time.
 	docRetry = time.Minute
+	// docFetchTimeout bounds one fetch, whoever started it.
+	docFetchTimeout = 30 * time.Second
 )
 
 // ErrRolledBack refuses a document older than one the panel has seen: an index put back
@@ -71,7 +73,11 @@ func (d *signedCache[T]) get(ctx context.Context, now time.Time, seen string, fe
 		d.flight = done
 		d.mu.Unlock()
 
-		v, err := fetch(ctx)
+		// The fetch is everyone's: one caller going away (a page closed or reloaded) must not
+		// cancel it, or the failure would stand for all of them for docRetry.
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), docFetchTimeout)
+		v, err := fetch(fctx)
+		cancel()
 		if err == nil {
 			err = d.newer(seen, d.updated(v))
 		}

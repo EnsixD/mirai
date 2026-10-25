@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.5
+### en
+- **The addon catalog loads every time**: a page closed while the catalog was being fetched no longer fails the fetch for everyone for a minute.
+### ru
+- **Каталог аддонов загружается всегда**: если страницу закрыли во время загрузки каталога, это больше не ломает загрузку для всех на минуту.
+
 ## 0.6.4
 ### en
 - **Addons from the catalog install again**: the server command checks the catalog signature in the context of mikan, as the panel does.
