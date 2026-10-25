@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.1
+### en
+- **Links of the earlier Mirai panel keep working**: tokens of 9 to 32 characters, and `/<token>` at the root of the address.
+### ru
+- **Ссылки прежней панели Mirai продолжают работать**: ключи длиной от 9 до 32 символов и адрес `/<ключ>` без служебного пути.
+
 ## 0.6.0
 ### en
 - **Mirai on the mikan code base** (see NOTICE.md): renamed, own logo, commands `mirai` and `mirai-node`.

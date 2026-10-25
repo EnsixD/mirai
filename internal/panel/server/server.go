@@ -88,6 +88,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, admin bool) {
 		r2.URL.Path = p[len(paths.Legacy)+1:]
 		r2.URL.RawPath = ""
 		s.legacy.ServeHTTP(w, r2)
+	case seg != "" && rest == "" && paths.Sub != "" && rootToken(seg):
+		// The earlier Mirai panel served subscriptions at "/<token>" with no path before
+		// it; the links handed out then keep working. An unknown token is a 404 there.
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + seg
+		r2.URL.RawPath = ""
+		s.sub.ServeHTTP(w, r2)
 	case s.hello != nil && s.hello(w, r):
 	default:
 		s.other(w, r)
@@ -144,3 +151,18 @@ func FrameHeaders(h http.Header) {
 
 // NotFound is the plain 404 (frontpage.NotFound).
 func NotFound(w http.ResponseWriter) { frontpage.NotFound(w) }
+
+// rootToken says whether seg can be a subscription token at the site's root: 9 to 32
+// Latin letters and digits, as the earlier Mirai panel issued them.
+func rootToken(seg string) bool {
+	if len(seg) < 9 || len(seg) > 32 {
+		return false
+	}
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return true
+}

@@ -207,7 +207,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		server.NotFound(w)
 		return
 	}
-	if len(token) != 24 {
+	// New links carry 24 characters; links moved over from the earlier Mirai panel carry
+	// 9 to 32 (its setting), and they keep working.
+	if len(token) < 9 || len(token) > 32 {
 		server.NotFound(w)
 		return
 	}
