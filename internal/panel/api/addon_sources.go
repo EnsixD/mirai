@@ -55,7 +55,7 @@ type sourcesOutput struct{ Body SourcesView }
 
 type addSourceInput struct {
 	Body struct {
-		URL string `json:"url" minLength:"1" maxLength:"512" doc:"https://…/mirai-addon.json, https://…/index.json или github.com/<владелец>/<репозиторий> (последний релиз)"`
+		URL string `json:"url" minLength:"1" maxLength:"512" doc:"https://…/mikan-addon.json, https://…/index.json или github.com/<владелец>/<репозиторий> (последний релиз)"`
 		Key string `json:"key,omitempty" maxLength:"64" doc:"Публичный ключ автора, ed25519 в base64, если админ знает его заранее: источник принимается, только если подписан им"`
 	}
 }

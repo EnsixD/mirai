@@ -2816,7 +2816,7 @@ export interface components {
         AddSourceInputBody: {
             /** @description Публичный ключ автора, ed25519 в base64, если админ знает его заранее: источник принимается, только если подписан им */
             key?: string;
-            /** @description https://…/mirai-addon.json, https://…/index.json или github.com/<владелец>/<репозиторий> (последний релиз) */
+            /** @description https://…/mikan-addon.json, https://…/index.json или github.com/<владелец>/<репозиторий> (последний релиз) */
             url: string;
         };
         AddonCatalogEntry: {

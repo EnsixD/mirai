@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.3
+### en
+- **The addon catalog loads again**: the marketplace and community index signatures, the addon file name and the addon environment keep the names of mikan they are built for.
+### ru
+- **Каталог аддонов снова загружается**: подписи каталога и сообщества, имя файла аддона и переменные для аддонов остались такими, как у mikan, под который они сделаны.
+
 ## 0.6.2
 ### en
 - **A node added from the command line starts empty too** (`mirai admin node add`): no default inbounds.

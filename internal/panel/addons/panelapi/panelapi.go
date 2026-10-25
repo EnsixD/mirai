@@ -30,7 +30,7 @@ import (
 )
 
 // Prefix is where the API lives on its listener; the host hands it to addons as
-// MIRAI_PANEL_URL.
+// MIKAN_PANEL_URL.
 const Prefix = "/panel/v2"
 
 // MaxBody bounds what an addon may send in one request.

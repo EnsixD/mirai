@@ -31,11 +31,13 @@ func VerifyAny(data []byte, sig string, keys ...ed25519.PublicKey) error {
 // The marketplace's documents are signed in a context: the signature covers the context and
 // then the bytes, so a signature made for one kind of document never passes for another, nor
 // for a release, whoever holds which key. It is published next to the file as SigSuffix.
+// The contexts and the addon names below stay those of mikan: its catalog, the community
+// registry and the addons in them are signed and built for them.
 const (
 	// CatalogContext is the official catalog's (CatalogKey).
-	CatalogContext = "mirai catalog v1\n"
+	CatalogContext = "mikan catalog v1\n"
 	// CommunityContext is the community registry's index (CommunityKey).
-	CommunityContext = "mirai community v1\n"
+	CommunityContext = "mikan community v1\n"
 	// SigSuffix names the signature in a context next to its file; a release's own (".sig") is
 	// over the bytes alone.
 	SigSuffix = ".sig2"

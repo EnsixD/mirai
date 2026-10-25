@@ -34,7 +34,7 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return e.Message }
 
-// Remote is Backend over the Panel API: base is MIRAI_PANEL_URL, token MIRAI_PANEL_TOKEN.
+// Remote is Backend over the Panel API: base is MIKAN_PANEL_URL, token MIKAN_PANEL_TOKEN.
 type Remote struct {
 	base, token string
 	hc          *http.Client

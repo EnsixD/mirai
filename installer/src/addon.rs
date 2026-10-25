@@ -525,7 +525,7 @@ pub fn compose_yaml(
             // The same token opens the Bot API proxy; the number before it means nothing
             // (frameworks want one), the bot's id comes from getMe.
             y.push_str(&format!(
-                "      MIRAI_PANEL_URL: \"http://{api}/panel/v2\"\n      MIRAI_PANEL_TOKEN: \"{t}\"\n      MIRAI_BOT_API_URL: \"http://{api}\"\n      MIRAI_BOT_TOKEN: \"0:{t}\"\n",
+                "      MIKAN_PANEL_URL: \"http://{api}/panel/v2\"\n      MIKAN_PANEL_TOKEN: \"{t}\"\n      MIKAN_BOT_API_URL: \"http://{api}\"\n      MIKAN_BOT_TOKEN: \"0:{t}\"\n",
                 t = a.panel_token
             ));
         }
@@ -1817,10 +1817,10 @@ fe80::1 21355/tcp on mirai-addons ALLOW       Anywhere (v6)
         for want in [
             "  telegram:\n",
             "mem_limit: 192m",
-            "MIRAI_PANEL_URL: \"http://127.0.0.1:41990/panel/v2\"",
-            &format!("MIRAI_PANEL_TOKEN: \"{}\"", "b".repeat(48)),
-            "MIRAI_BOT_API_URL: \"http://127.0.0.1:41990\"",
-            &format!("MIRAI_BOT_TOKEN: \"0:{}\"", "b".repeat(48)),
+            "MIKAN_PANEL_URL: \"http://127.0.0.1:41990/panel/v2\"",
+            &format!("MIKAN_PANEL_TOKEN: \"{}\"", "b".repeat(48)),
+            "MIKAN_BOT_API_URL: \"http://127.0.0.1:41990\"",
+            &format!("MIKAN_BOT_TOKEN: \"0:{}\"", "b".repeat(48)),
             "network_mode: host",
             "read_only: true",
         ] {
@@ -1966,7 +1966,7 @@ fe80::1 21355/tcp on mirai-addons ALLOW       Anywhere (v6)
             "networks: [mirai-addons]",
             "ports: [\"127.0.0.1:45617:45617\"]",
             "MIRAI_ADAPTER_LISTEN: \"0.0.0.0:45617\"",
-            "MIRAI_PANEL_URL: \"http://172.18.0.1:41990/panel/v2\"",
+            "MIKAN_PANEL_URL: \"http://172.18.0.1:41990/panel/v2\"",
             "cap_drop: [ALL]",
             "read_only: true",
         ] {

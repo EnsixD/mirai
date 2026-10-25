@@ -24,7 +24,7 @@ import (
 )
 
 // The Bot API proxy: the addon that holds the bot (permission bot, chosen by the admin) runs
-// on any Telegram framework pointed at MIRAI_BOT_API_URL with MIRAI_BOT_TOKEN. The panel keeps
+// on any Telegram framework pointed at MIKAN_BOT_API_URL with MIKAN_BOT_TOKEN. The panel keeps
 // the real token, the polling and the payments: getUpdates reads what the gateway buffered,
 // the calls an addon may make go to Telegram through the gateway's outbox (its limits) and
 // come back with Telegram's own answer, and the rest is refused as Telegram would.
@@ -242,7 +242,7 @@ func (s *Server) botAPI(w http.ResponseWriter, r *http.Request) {
 		answer []byte
 	)
 	done := make(chan error, 1)
-	out.Do(chat, r.Header.Get("X-Mirai-Priority"), func(ctx context.Context, c *tgapi.Client) error {
+	out.Do(chat, r.Header.Get("X-Mikan-Priority"), func(ctx context.Context, c *tgapi.Client) error {
 		var err error
 		code, answer, err = c.Forward(ctx, method, ct, body)
 		return err

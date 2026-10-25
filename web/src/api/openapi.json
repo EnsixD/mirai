@@ -56,7 +56,7 @@
             "type": "string"
           },
           "url": {
-            "description": "https://…/mirai-addon.json, https://…/index.json или github.com/\u003cвладелец\u003e/\u003cрепозиторий\u003e (последний релиз)",
+            "description": "https://…/mikan-addon.json, https://…/index.json или github.com/\u003cвладелец\u003e/\u003cрепозиторий\u003e (последний релиз)",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"

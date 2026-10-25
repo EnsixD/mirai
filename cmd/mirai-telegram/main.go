@@ -3,9 +3,9 @@
 // the panel as an addon of protocol 2 in client mode and sees the panel only through what
 // the host hands it:
 //
-//	MIRAI_PANEL_URL, MIRAI_PANEL_TOKEN  the Panel API: the bot's data (POST /bot/{method})
+//	MIKAN_PANEL_URL, MIKAN_PANEL_TOKEN  the Panel API: the bot's data (POST /bot/{method})
 //	                                     and the feed of events (payment messages, notices)
-//	MIRAI_BOT_API_URL, MIRAI_BOT_TOKEN  the Bot API proxy: the updates and the sends; the
+//	MIKAN_BOT_API_URL, MIKAN_BOT_TOKEN  the Bot API proxy: the updates and the sends; the
 //	                                     panel keeps the real token and the payments
 package main
 
@@ -40,8 +40,8 @@ func main() {
 		}
 		return v
 	}
-	panelURL, panelToken := env("MIRAI_PANEL_URL"), env("MIRAI_PANEL_TOKEN")
-	botURL, botToken := env("MIRAI_BOT_API_URL"), env("MIRAI_BOT_TOKEN")
+	panelURL, panelToken := env("MIKAN_PANEL_URL"), env("MIKAN_PANEL_TOKEN")
+	botURL, botToken := env("MIKAN_BOT_API_URL"), env("MIKAN_BOT_TOKEN")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Info("mirai-telegram starting", "version", version)

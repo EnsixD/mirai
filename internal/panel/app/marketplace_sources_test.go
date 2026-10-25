@@ -106,9 +106,9 @@ func (l *srcLab) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "down", http.StatusServiceUnavailable)
 	case r.URL.Path == "/redirect-other":
 		// Another name for the same machine: another host as far as redirects go.
-		http.Redirect(w, r, "http://localhost:"+strings.Split(l.src.URL, ":")[2]+"/mirai-addon.json", http.StatusFound)
+		http.Redirect(w, r, "http://localhost:"+strings.Split(l.src.URL, ":")[2]+"/mikan-addon.json", http.StatusFound)
 	case r.URL.Path == "/redirect-same":
-		http.Redirect(w, r, "/mirai-addon.json", http.StatusFound)
+		http.Redirect(w, r, "/mikan-addon.json", http.StatusFound)
 	case r.URL.Path == "/boom.json":
 		http.Error(w, "boom", http.StatusInternalServerError)
 	case r.URL.Path == "/huge.json":
@@ -310,7 +310,7 @@ func TestAddonSourcesRefusals(t *testing.T) {
 	l := newSrcLab(t)
 	author := newKey(t)
 	l.publish("/ok.json", l.catalogDoc(srcEntry("hello", "1.0.0", "b", "generic", "kv")), author)
-	l.publish("/mirai-addon.json", srcEntry("hello", "1.0.0", "b", "generic", "kv"), nil)
+	l.publish("/mikan-addon.json", srcEntry("hello", "1.0.0", "b", "generic", "kv"), nil)
 	l.publish("/notjson.json", map[string]any{}, nil)
 	l.mu.Lock()
 	l.files["/notjson.json"] = []byte("<html>not a source</html>")
@@ -355,7 +355,7 @@ func TestAddonSourcesRefusals(t *testing.T) {
 		"bad signature":       {url(l.url("/badsig.json")), "source_signature_invalid", "body.url"},
 		"bad key":             {map[string]any{"url": l.url("/ok.json"), "key": "not a key"}, "source_key_invalid", "body.key"},
 		"other key":           {map[string]any{"url": l.url("/ok.json"), "key": base64.StdEncoding.EncodeToString(newKey(t).Public().(ed25519.PublicKey))}, "source_key_changed", "body.key"},
-		"key but unsigned":    {map[string]any{"url": l.url("/mirai-addon.json"), "key": base64.StdEncoding.EncodeToString(author.Public().(ed25519.PublicKey))}, "source_key_changed", "body.key"},
+		"key but unsigned":    {map[string]any{"url": l.url("/mikan-addon.json"), "key": base64.StdEncoding.EncodeToString(author.Public().(ed25519.PublicKey))}, "source_key_changed", "body.key"},
 	} {
 		resp, out := l.h.do(http.MethodPost, l.api+"/addon-sources", c.body, l.csrf)
 		if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(out), c.want) || !strings.Contains(string(out), c.in) {
@@ -583,18 +583,18 @@ func TestAddonSourcesInstall(t *testing.T) {
 // pinned from then on.
 func TestAddonSourceUnsigned(t *testing.T) {
 	l := newSrcLab(t)
-	l.publish("/mirai-addon.json", srcEntry("solo", "1.0.0", "b", "ui", "ui"), nil)
+	l.publish("/mikan-addon.json", srcEntry("solo", "1.0.0", "b", "ui", "ui"), nil)
 	v := l.sources()
 	if len(v.Sources) != 0 {
 		t.Fatal("sources before adding any")
 	}
-	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/mirai-addon.json")}, http.StatusCreated)
+	l.call(http.MethodPost, "/addon-sources", map[string]any{"url": l.url("/mikan-addon.json")}, http.StatusCreated)
 	s := l.sources().Sources[0]
 	if s.Signed || s.Fingerprint != "" || s.Entries != 1 || s.Title != "127.0.0.1" {
 		t.Fatalf("unsigned source: %+v", s)
 	}
 	author := newKey(t)
-	l.publish("/mirai-addon.json", srcEntry("solo", "1.0.1", "b", "ui", "ui"), author)
+	l.publish("/mikan-addon.json", srcEntry("solo", "1.0.1", "b", "ui", "ui"), author)
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh", nil, http.StatusOK)
 	// The key is not pinned behind the admin's back: it waits for the fingerprint, the source
 	// stays unsigned (the stronger warning stays) and offers nothing meanwhile.
@@ -614,7 +614,7 @@ func TestAddonSourceUnsigned(t *testing.T) {
 		t.Fatalf("an accepted key: %+v", s)
 	}
 	// From now on it is held to the key.
-	l.publish("/mirai-addon.json", srcEntry("solo", "1.0.2", "b", "ui", "ui"), nil)
+	l.publish("/mikan-addon.json", srcEntry("solo", "1.0.2", "b", "ui", "ui"), nil)
 	l.call(http.MethodPost, "/addon-sources/"+itoa(s.ID)+"/refresh", nil, http.StatusOK)
 	if s = l.sources().Sources[0]; s.Error != "source_key_changed" {
 		t.Fatalf("a pinned source fetched unsigned: %+v", s)

@@ -54,7 +54,7 @@ func newSlowSource(t *testing.T, body []byte) *slowSource {
 	s := &slowSource{body: body}
 	s.status.Store(http.StatusOK)
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/mirai-addon.json" {
+		if r.URL.Path != "/mikan-addon.json" {
 			http.NotFound(w, r)
 			return
 		}
@@ -75,7 +75,7 @@ func newSlowSource(t *testing.T, body []byte) *slowSource {
 }
 
 func (s *slowSource) row() db.AddonSource {
-	return db.AddonSource{ID: 1, Url: s.srv.URL + "/mirai-addon.json"}
+	return db.AddonSource{ID: 1, Url: s.srv.URL + "/mikan-addon.json"}
 }
 
 // settled waits until what the source's fetch left in memory satisfies ok.
@@ -254,9 +254,9 @@ func TestSourceSignatureAbsentOnCommonHosts(t *testing.T) {
 	sigBody.Store("")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/mirai-addon.json":
+		case "/mikan-addon.json":
 			_, _ = w.Write(data)
-		case "/mirai-addon.json.sig":
+		case "/mikan-addon.json.sig":
 			if st := int(sigStatus.Load()); st != http.StatusOK {
 				http.Error(w, "no", st)
 				return
@@ -266,7 +266,7 @@ func TestSourceSignatureAbsentOnCommonHosts(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	m := srcManager(t, devNet())
-	url := srv.URL + "/mirai-addon.json"
+	url := srv.URL + "/mikan-addon.json"
 	pinned := SourcePin{Key: "A" + strings.Repeat("A", 42) + "="}
 	for _, status := range []int32{http.StatusNotFound, http.StatusForbidden, http.StatusGone} {
 		sigStatus.Store(status)

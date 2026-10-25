@@ -310,7 +310,7 @@ type ghAsset struct {
 	URL  string `json:"browser_download_url"`
 }
 
-// githubFiles finds the latest release's file (mirai-addon.json, else index.json) and its
+// githubFiles finds the latest release's file (mikan-addon.json, else index.json) and its
 // signature. Only downloads from the repository's own release page are followed.
 func (n *sourceNet) githubFiles(ctx context.Context, r ghRepo) (file, sig string, err error) {
 	api := fmt.Sprintf("%s/repos/%s/%s/releases/latest", n.ghAPI, r.owner, r.repo)
@@ -337,7 +337,7 @@ func (n *sourceNet) githubFiles(ctx context.Context, r ghRepo) (file, sig string
 		}
 		return ""
 	}
-	for _, name := range []string{"mirai-addon.json", "index.json"} {
+	for _, name := range []string{"mikan-addon.json", "index.json"} {
 		if file = find(name); file != "" {
 			return file, find(name + ".sig"), nil
 		}
