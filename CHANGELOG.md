@@ -3,6 +3,12 @@
 Each release has a section in English and in Russian; the release workflow puts them in
 the signed manifest, and the panel shows the one in its language.
 
+## 0.6.6
+### en
+- **Payment addons start again** (YooKassa and others): they get their address and token as `MIKAN_ADAPTER_LISTEN` and `MIKAN_ADAPTER_TOKEN`, the names they are built for.
+### ru
+- **Аддоны оплаты снова запускаются** (ЮKassa и другие): адрес и токен передаются им как `MIKAN_ADAPTER_LISTEN` и `MIKAN_ADAPTER_TOKEN`, под которые они сделаны.
+
 ## 0.6.5
 ### en
 - **The addon catalog loads every time**: a page closed while the catalog was being fetched no longer fails the fetch for everyone for a minute.

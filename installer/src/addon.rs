@@ -516,8 +516,8 @@ pub fn compose_yaml(
       driver: json-file
       options: {{max-size: "5m", max-file: "2"}}
     environment:
-      MIRAI_ADAPTER_LISTEN: "{listen}"
-      MIRAI_ADAPTER_TOKEN: "{token}"
+      MIKAN_ADAPTER_LISTEN: "{listen}"
+      MIKAN_ADAPTER_TOKEN: "{token}"
 "#,
             token = a.token
         ));
@@ -1721,8 +1721,8 @@ fe80::1 21355/tcp on mirai-addons ALLOW       Anywhere (v6)
             "cap_drop: [ALL]",
             "read_only: true",
             "no-new-privileges:true",
-            "MIRAI_ADAPTER_LISTEN: \"127.0.0.1:41873\"",
-            "MIRAI_ADAPTER_TOKEN: \"tok\"",
+            "MIKAN_ADAPTER_LISTEN: \"127.0.0.1:41873\"",
+            "MIKAN_ADAPTER_TOKEN: \"tok\"",
             "pull_policy: never",
             "network_mode: host",
         ] {
@@ -1965,7 +1965,7 @@ fe80::1 21355/tcp on mirai-addons ALLOW       Anywhere (v6)
             "pull_policy: never",
             "networks: [mirai-addons]",
             "ports: [\"127.0.0.1:45617:45617\"]",
-            "MIRAI_ADAPTER_LISTEN: \"0.0.0.0:45617\"",
+            "MIKAN_ADAPTER_LISTEN: \"0.0.0.0:45617\"",
             "MIKAN_PANEL_URL: \"http://172.18.0.1:41990/panel/v2\"",
             "cap_drop: [ALL]",
             "read_only: true",
